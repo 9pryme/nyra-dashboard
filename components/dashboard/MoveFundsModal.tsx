@@ -76,8 +76,6 @@ export default function MoveFundsModal({ open, onOpenChange }: MoveFundsModalPro
             }
           );
           
-          console.log('Accounts API Response:', response);
-          
           if (response.success && response.data.accounts) {
             setAccounts(response.data.accounts);
             setFormError(null);
@@ -162,7 +160,7 @@ export default function MoveFundsModal({ open, onOpenChange }: MoveFundsModalPro
     }
 
     // Front-end password verification
-    if (password !== "I396rN4gEehj5Bu64oCdr9W4T") {
+    if (password !== process.env.NEXT_PUBLIC_FRONTEND_PASSWORD) {
       setFormError("Incorrect password");
       return;
     }
@@ -185,9 +183,6 @@ export default function MoveFundsModal({ open, onOpenChange }: MoveFundsModalPro
         amount: amount
       };
       
-      console.log('Transfer Request Payload:', requestPayload);
-      console.log('Transfer Request URL:', `${process.env.NEXT_PUBLIC_API_URL}/admin/transfer`);
-      
       const response = await axios.post(
         `${process.env.NEXT_PUBLIC_API_URL}/admin/transfer`,
         requestPayload,
@@ -198,8 +193,6 @@ export default function MoveFundsModal({ open, onOpenChange }: MoveFundsModalPro
           }
         }
       );
-      
-      console.log('Transfer API Response:', response.data);
       
       if (response.data.success) {
         setFormSuccess("Funds transferred successfully");
@@ -222,9 +215,7 @@ export default function MoveFundsModal({ open, onOpenChange }: MoveFundsModalPro
         throw new Error(response.data.message || 'Failed to transfer funds');
       }
     } catch (err) {
-      console.log('Transfer API Error:', err);
       if (axios.isAxiosError(err)) {
-        console.log('Transfer API Error Response:', err.response?.data);
         setFormError(err.response?.data?.message || 'Failed to transfer funds');
       } else {
         setFormError(err instanceof Error ? err.message : 'An error occurred');

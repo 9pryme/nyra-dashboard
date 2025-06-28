@@ -38,7 +38,7 @@ export default function NyraLoading({ className = "", size = "md" }: NyraLoading
               repeatType: "reverse",
               repeatDelay: 1
             }}
-            className={`font-bold tracking-wider ${sizeClasses[size]} bg-gradient-to-r from-[#64D600] via-[#64D600] to-[#64D600] bg-clip-text text-transparent`}
+            className={`font-clash font-bold tracking-wider ${sizeClasses[size]} bg-gradient-to-r from-[#64D600] via-[#64D600] to-[#64D600] bg-clip-text text-transparent`}
           >
             <motion.span
               animate={{

@@ -15,6 +15,7 @@ import {
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Loader2, AlertCircle, CheckCircle2 } from "lucide-react";
 import axios from "axios";
+import { apiCache } from "@/lib/cache";
 
 interface ServiceData {
   name: string;
@@ -66,17 +67,29 @@ export default function ServiceManagement() {
 
     try {
       const [featuresResponse, optionsResponse] = await Promise.all([
-        axios.get(`${process.env.NEXT_PUBLIC_API_URL}/admin/control-panel/get-features`, {
-          headers: { Authorization: `Bearer ${token}` }
-        }),
-        axios.get(`${process.env.NEXT_PUBLIC_API_URL}/admin/control-panel/options`, {
-          headers: { Authorization: `Bearer ${token}` }
-        })
+        apiCache.getOrFetch<any>(
+          'service_features',
+          async () => {
+            const response = await axios.get(`${process.env.NEXT_PUBLIC_API_URL}/admin/control-panel/get-features`, {
+              headers: { Authorization: `Bearer ${token}` }
+            });
+            return response.data;
+          }
+        ),
+        apiCache.getOrFetch<any>(
+          'service_options',
+          async () => {
+            const response = await axios.get(`${process.env.NEXT_PUBLIC_API_URL}/admin/control-panel/options`, {
+              headers: { Authorization: `Bearer ${token}` }
+            });
+            return response.data;
+          }
+        )
       ]);
 
-      if (featuresResponse.data.success && optionsResponse.data.success) {
-        const features = featuresResponse.data.data;
-        const options = optionsResponse.data.data;
+      if (featuresResponse.success && optionsResponse.success) {
+        const features = featuresResponse.data;
+        const options = optionsResponse.data;
         
         // Extract relevant feature data
         const chosenProviders = features.find((f: any) => f.id === 'chosen_providers')?.properties?.chosen_providers;

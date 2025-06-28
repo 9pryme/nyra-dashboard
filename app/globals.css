@@ -104,3 +104,23 @@
     @apply text-sm tracking-[-0.005em] lg:text-base;
   }
 }
+
+/* Security Styles */
+@layer utilities {
+  .no-select {
+    -webkit-user-select: none;
+    -moz-user-select: none;
+    -ms-user-select: none;
+    user-select: none;
+  }
+  
+  .secure-admin {
+    -webkit-user-select: none;
+    -moz-user-select: none;
+    -ms-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+    -webkit-tap-highlight-color: transparent;
+    pointer-events: auto;
+  }
+}
