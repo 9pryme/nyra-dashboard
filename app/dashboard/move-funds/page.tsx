@@ -33,6 +33,8 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { AlertCircle, CheckCircle2, ArrowRightLeft, LockKeyhole, ReceiptText } from "lucide-react";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
+import NyraLoading from "@/components/ui/nyra-loading";
+import { apiCache } from "@/lib/cache";
 
 interface Account {
   provider: string;
@@ -57,30 +59,38 @@ export default function MoveFundsPage() {
 
   useEffect(() => {
     const fetchAccounts = async () => {
-      try {
-        const token = localStorage.getItem('token');
-        if (!token) {
-          throw new Error('No authentication token found');
-        }
+      const token = localStorage.getItem('token');
+      if (!token) {
+        setFormError('No authentication token found');
+        setLoadingAccounts(false);
+        return;
+      }
 
-        const response = await axios.get(
-          `${process.env.NEXT_PUBLIC_API_URL}/global/accounts`, 
-          {
-            headers: { Authorization: `Bearer ${token}` }
+      try {
+        const response = await apiCache.getOrFetch<any>(
+          'global_accounts',
+          async () => {
+            const axiosResponse = await axios.get(
+              `${process.env.NEXT_PUBLIC_API_URL}/global/accounts`, 
+              {
+                headers: { Authorization: `Bearer ${token}` }
+              }
+            );
+            return axiosResponse.data;
           }
         );
         
-        if (response.data.success && response.data.data.accounts) {
-          setAccounts(response.data.data.accounts);
+        console.log('Accounts API Response:', response);
+        
+        if (response.success && response.data.accounts) {
+          setAccounts(response.data.accounts);
+          setFormError(null);
         } else {
-          throw new Error(response.data.message || 'Failed to fetch accounts');
+          throw new Error(response.message || 'Failed to fetch accounts');
         }
-      } catch (err) {
-        if (axios.isAxiosError(err)) {
-          setFormError(err.response?.data?.message || 'Failed to load accounts');
-        } else {
-          setFormError(err instanceof Error ? err.message : 'An error occurred');
-        }
+      } catch (err: any) {
+        console.error('Move-funds accounts fetch error:', err);
+        setFormError(err.message || 'Failed to load accounts');
       } finally {
         setLoadingAccounts(false);
       }
@@ -91,13 +101,42 @@ export default function MoveFundsPage() {
 
   const handleSourceAccountChange = (value: string) => {
     setSourceAccount(value);
+    
+    // Re-evaluate destination bank code if destination is already selected
+    if (destinationAccount) {
+      const selectedDestAccount = accounts.find(account => account.account_id === destinationAccount);
+      const newSourceAccountData = accounts.find(account => account.account_id === value);
+      
+      if (selectedDestAccount) {
+        // Special case: Polaris to Kuda transfer uses bank code 981
+        if (newSourceAccountData?.provider.toLowerCase() === 'polaris' && 
+            selectedDestAccount.provider.toLowerCase() === 'kuda') {
+          console.log('Applying special rule: Polaris to Kuda - using bank code 981');
+          setDestinationBankCode('981');
+        } else {
+          console.log(`Using default bank code: ${selectedDestAccount.bankCode} for ${selectedDestAccount.provider}`);
+          setDestinationBankCode(selectedDestAccount.bankCode);
+        }
+      }
+    }
   };
 
   const handleDestinationAccountChange = (value: string) => {
     const selectedAccount = accounts.find(account => account.account_id === value);
+    const sourceAccountData = accounts.find(account => account.account_id === sourceAccount);
+    
     if (selectedAccount) {
       setDestinationAccount(value);
-      setDestinationBankCode(selectedAccount.bankCode);
+      
+      // Special case: Polaris to Kuda transfer uses bank code 981
+      if (sourceAccountData?.provider.toLowerCase() === 'polaris' && 
+          selectedAccount.provider.toLowerCase() === 'kuda') {
+        console.log('Applying special rule: Polaris to Kuda - using bank code 981');
+        setDestinationBankCode('981');
+      } else {
+        console.log(`Using default bank code: ${selectedAccount.bankCode} for ${selectedAccount.provider}`);
+        setDestinationBankCode(selectedAccount.bankCode);
+      }
     }
   };
 
@@ -126,7 +165,7 @@ export default function MoveFundsPage() {
     }
 
     // Front-end password verification
-    if (password !== process.env.NEXT_PUBLIC_FRONTEND_PASSWORD) {
+    if (password !== "I396rN4gEehj5Bu64oCdr9W4T") {
       setFormError("Incorrect password");
       return;
     }
@@ -141,15 +180,25 @@ export default function MoveFundsPage() {
         throw new Error('No authentication token found');
       }
       
+      const requestPayload = {
+        password: process.env.NEXT_PUBLIC_API_PASSWORD,
+        source_account_number: sourceAccount,
+        destination_account_number: destinationAccount,
+        destination_bank_code: destinationBankCode,
+        amount: amount
+      };
+      
+      console.log('Transfer Request Payload:', requestPayload);
+      console.log('Transfer Request URL:', `${process.env.NEXT_PUBLIC_API_URL}/admin/transfer`);
+      console.log('Source Account Selected:', sourceAccount);
+      console.log('Destination Account Selected:', destinationAccount);
+      console.log('Destination Bank Code:', destinationBankCode);
+      console.log('Amount:', amount, typeof amount);
+      console.log('API Password defined:', !!process.env.NEXT_PUBLIC_API_PASSWORD);
+      
       const response = await axios.post(
         `${process.env.NEXT_PUBLIC_API_URL}/admin/transfer`,
-        {
-          password: process.env.NEXT_PUBLIC_API_PASSWORD,
-          source_account_number: sourceAccount,
-          destination_account_number: destinationAccount,
-          destination_bank_code: destinationBankCode,
-          amount: amount
-        },
+        requestPayload,
         {
           headers: {
             Authorization: `Bearer ${token}`,
@@ -157,6 +206,8 @@ export default function MoveFundsPage() {
           }
         }
       );
+      
+      console.log('Transfer API Response:', response.data);
       
       if (response.data.success) {
         setFormSuccess("Funds transferred successfully");
@@ -175,7 +226,9 @@ export default function MoveFundsPage() {
         throw new Error(response.data.message || 'Failed to transfer funds');
       }
     } catch (err) {
+      console.log('Transfer API Error:', err);
       if (axios.isAxiosError(err)) {
+        console.log('Transfer API Error Response:', err.response?.data);
         setFormError(err.response?.data?.message || 'Failed to transfer funds');
       } else {
         setFormError(err instanceof Error ? err.message : 'An error occurred');
@@ -196,20 +249,21 @@ export default function MoveFundsPage() {
   };
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="space-y-6">
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.5 }}
+        className="mb-4"
       >
-        <h1 className="text-2xl font-bold tracking-[-0.02em]">Move Funds</h1>
-        <p className="text-muted-foreground">Transfer funds between accounts and view transaction history.</p>
+        <h1 className="text-xl lg:text-2xl">Move Funds</h1>
+        <p className="text-muted-foreground mt-1 text-sm">Transfer funds between accounts and view transaction history.</p>
       </motion.div>
       
-      <div className="flex flex-col lg:flex-row gap-6">
+      <div className="flex flex-col xl:flex-row gap-3 lg:gap-4 min-w-0">
         {/* Left side - Transfer Form */}
         <motion.div 
-          className="w-full lg:w-1/3"
+          className="w-full xl:w-1/3 min-w-0"
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.5, delay: 0.2 }}
@@ -224,42 +278,34 @@ export default function MoveFundsPage() {
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <form onSubmit={handleSubmit} className="space-y-4">
-                <div className="space-y-2">
-                  <Label htmlFor="sourceAccount">From Account</Label>
-                  <Select value={sourceAccount} onValueChange={handleSourceAccountChange}>
-                    <SelectTrigger id="sourceAccount">
-                      <SelectValue placeholder="Select source account" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {loadingAccounts ? (
-                        <div className="p-2 text-center text-sm text-muted-foreground">
-                          Loading accounts...
-                        </div>
-                      ) : (
-                        accounts.map((account) => (
+              {loadingAccounts ? (
+                <NyraLoading size="sm" className="min-h-[200px]" />
+              ) : (
+                <form onSubmit={handleSubmit} className="space-y-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="sourceAccount">From Account</Label>
+                    <Select value={sourceAccount} onValueChange={handleSourceAccountChange}>
+                      <SelectTrigger id="sourceAccount">
+                        <SelectValue placeholder="Select source account" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {accounts.map((account) => (
                           <SelectItem key={account.account_id} value={account.account_id}>
                             {formatAccountOption(account)}
                           </SelectItem>
-                        ))
-                      )}
-                    </SelectContent>
-                  </Select>
-                </div>
-                
-                <div className="space-y-2">
-                  <Label htmlFor="destinationAccount">To Account</Label>
-                  <Select value={destinationAccount} onValueChange={handleDestinationAccountChange}>
-                    <SelectTrigger id="destinationAccount">
-                      <SelectValue placeholder="Select destination account" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {loadingAccounts ? (
-                        <div className="p-2 text-center text-sm text-muted-foreground">
-                          Loading accounts...
-                        </div>
-                      ) : (
-                        accounts.map((account) => (
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  
+                  <div className="space-y-2">
+                    <Label htmlFor="destinationAccount">To Account</Label>
+                    <Select value={destinationAccount} onValueChange={handleDestinationAccountChange}>
+                      <SelectTrigger id="destinationAccount">
+                        <SelectValue placeholder="Select destination account" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {accounts.map((account) => (
                           <SelectItem 
                             key={account.account_id} 
                             value={account.account_id}
@@ -267,53 +313,53 @@ export default function MoveFundsPage() {
                           >
                             {formatAccountOption(account)}
                           </SelectItem>
-                        ))
-                      )}
-                    </SelectContent>
-                  </Select>
-                </div>
-                
-                <div className="space-y-2">
-                  <Label htmlFor="amount">Amount (NGN)</Label>
-                  <Input
-                    id="amount"
-                    type="number"
-                    placeholder="Enter amount to transfer"
-                    value={amount}
-                    onChange={(e) => setAmount(e.target.value)}
-                  />
-                </div>
-                
-                <div className="space-y-2">
-                  <Label htmlFor="password" className="flex items-center gap-1">
-                    <LockKeyhole className="h-4 w-4" />
-                    Password
-                  </Label>
-                  <Input
-                    id="password"
-                    type="password"
-                    placeholder="Enter your password"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                  />
-                </div>
-                
-                {formError && (
-                  <Alert variant="destructive">
-                    <AlertCircle className="h-4 w-4" />
-                    <AlertTitle>Error</AlertTitle>
-                    <AlertDescription>{formError}</AlertDescription>
-                  </Alert>
-                )}
-                
-                {formSuccess && (
-                  <Alert variant="default" className="bg-green-50 text-green-800 border-green-200">
-                    <CheckCircle2 className="h-4 w-4 text-green-600" />
-                    <AlertTitle>Success</AlertTitle>
-                    <AlertDescription>{formSuccess}</AlertDescription>
-                  </Alert>
-                )}
-              </form>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  
+                  <div className="space-y-2">
+                    <Label htmlFor="amount">Amount (NGN)</Label>
+                    <Input
+                      id="amount"
+                      type="number"
+                      placeholder="Enter amount to transfer"
+                      value={amount}
+                      onChange={(e) => setAmount(e.target.value)}
+                    />
+                  </div>
+                  
+                  <div className="space-y-2">
+                    <Label htmlFor="password" className="flex items-center gap-1">
+                      <LockKeyhole className="h-4 w-4" />
+                      Password
+                    </Label>
+                    <Input
+                      id="password"
+                      type="password"
+                      placeholder="Enter your password"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                    />
+                  </div>
+                  
+                  {formError && (
+                    <Alert variant="destructive">
+                      <AlertCircle className="h-4 w-4" />
+                      <AlertTitle>Error</AlertTitle>
+                      <AlertDescription>{formError}</AlertDescription>
+                    </Alert>
+                  )}
+                  
+                  {formSuccess && (
+                    <Alert variant="default" className="bg-green-50 text-green-800 border-green-200">
+                      <CheckCircle2 className="h-4 w-4 text-green-600" />
+                      <AlertTitle>Success</AlertTitle>
+                      <AlertDescription>{formSuccess}</AlertDescription>
+                    </Alert>
+                  )}
+                </form>
+              )}
             </CardContent>
             <CardFooter>
               <Button 
@@ -330,7 +376,7 @@ export default function MoveFundsPage() {
         
         {/* Right side - Transaction History */}
         <motion.div 
-          className="w-full lg:w-2/3"
+          className="w-full xl:w-2/3 min-w-0"
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.5, delay: 0.3 }}

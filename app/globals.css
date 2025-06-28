@@ -1,3 +1,5 @@
+@import url('https://fonts.googleapis.com/css2?family=Sora:wght@100..800&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -78,15 +80,27 @@
     @apply border-border;
   }
   body {
-    @apply bg-background text-foreground;
+    @apply bg-background text-foreground font-sora;
+  }
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-clash font-semibold;
   }
   h1 {
-    @apply tracking-[-0.02em];
+    @apply text-3xl tracking-[-0.02em] lg:text-4xl;
   }
   h2 {
-    @apply tracking-[-0.015em];
+    @apply text-2xl tracking-[-0.015em] lg:text-3xl;
   }
   h3 {
-    @apply tracking-[-0.01em];
+    @apply text-xl tracking-[-0.01em] lg:text-2xl;
+  }
+  h4 {
+    @apply text-lg tracking-[-0.01em] lg:text-xl;
+  }
+  h5 {
+    @apply text-base tracking-[-0.005em] lg:text-lg;
+  }
+  h6 {
+    @apply text-sm tracking-[-0.005em] lg:text-base;
   }
 }

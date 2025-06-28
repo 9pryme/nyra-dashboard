@@ -78,6 +78,8 @@ interface WalletListProps {
 export default function WalletList({ wallets }: WalletListProps) {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [minAmount, setMinAmount] = useState<string>("");
+  const [maxAmount, setMaxAmount] = useState<string>("");
   const [showFreezeConfirm, setShowFreezeConfirm] = useState(false);
   const [showArchiveConfirm, setShowArchiveConfirm] = useState(false);
   const [selectedWallet, setSelectedWallet] = useState<string | null>(null);
@@ -98,17 +100,23 @@ export default function WalletList({ wallets }: WalletListProps) {
 
   const filteredWallets = wallets.filter(wallet => {
     const matchesSearch = 
-      wallet.wallet_id.toLowerCase().includes(search.toLowerCase()) ||
-      `${wallet.owner.firstname} ${wallet.owner.lastname}`.toLowerCase().includes(search.toLowerCase()) ||
-      wallet.owner.email.toLowerCase().includes(search.toLowerCase()) ||
-      wallet.owner.username.toLowerCase().includes(search.toLowerCase());
+      wallet.wallet_id?.toLowerCase().includes(search.toLowerCase()) ||
+      `${wallet.owner?.firstname || ''} ${wallet.owner?.lastname || ''}`.toLowerCase().includes(search.toLowerCase()) ||
+      wallet.owner?.email?.toLowerCase().includes(search.toLowerCase()) ||
+      wallet.owner?.username?.toLowerCase().includes(search.toLowerCase()) ||
+      false;
     
     const matchesStatus = 
       statusFilter === "all" || 
       (statusFilter === "frozen" && wallet.frozen) || 
       (statusFilter === "active" && !wallet.frozen);
 
-    return matchesSearch && matchesStatus;
+    // Amount filters
+    const balance = parseFloat(wallet.balance || '0');
+    const matchesMinAmount = !minAmount || balance >= parseFloat(minAmount);
+    const matchesMaxAmount = !maxAmount || balance <= parseFloat(maxAmount);
+
+    return matchesSearch && matchesStatus && matchesMinAmount && matchesMaxAmount;
   });
 
   const totalPages = Math.ceil(filteredWallets.length / itemsPerPage);
@@ -157,13 +165,13 @@ export default function WalletList({ wallets }: WalletListProps) {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
+        <Input
+          placeholder="Search wallets..."
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          className="w-[300px]"
+        />
         <div className="flex items-center gap-4">
-          <Input
-            placeholder="Search wallets..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="w-[300px]"
-          />
           <Select value={statusFilter} onValueChange={setStatusFilter}>
             <SelectTrigger className="w-[150px]">
               <SelectValue placeholder="Filter by status" />
@@ -174,6 +182,32 @@ export default function WalletList({ wallets }: WalletListProps) {
               <SelectItem value="frozen">Frozen</SelectItem>
             </SelectContent>
           </Select>
+          <Input
+            type="number"
+            placeholder="Min Amount"
+            value={minAmount}
+            onChange={(e) => setMinAmount(e.target.value)}
+            className="w-[120px]"
+          />
+          <Input
+            type="number"
+            placeholder="Max Amount"
+            value={maxAmount}
+            onChange={(e) => setMaxAmount(e.target.value)}
+            className="w-[120px]"
+          />
+          <Button 
+            variant="outline" 
+            onClick={() => {
+              setMinAmount("");
+              setMaxAmount("");
+              setSearch("");
+              setStatusFilter("all");
+            }}
+            className="text-sm"
+          >
+            Clear Filters
+          </Button>
         </div>
       </div>
 

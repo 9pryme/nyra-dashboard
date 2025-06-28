@@ -1,42 +1,20 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Input } from "@/components/ui/input";
-import { Search, ChevronLeft, ChevronRight, MoreVertical, Copy, Check } from "lucide-react";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import TransactionDetailsModal from "./TransactionDetailsModal";
+import { Copy, Check, ArrowUpRight, X } from "lucide-react";
 import axios from "axios";
 import { format } from "date-fns";
-import { Skeleton } from "@/components/ui/skeleton";
+import Link from "next/link";
+import { TransactionTableSkeleton } from "@/components/ui/skeleton-loader";
 import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { transactionCache } from "@/lib/cache";
 
 interface Transaction {
   created_at: string;
@@ -83,42 +61,44 @@ interface ApiResponse {
 }
 
 export default function TransactionList() {
-  const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState("all");
-  const [typeFilter, setTypeFilter] = useState("all");
-  const [currentPage, setCurrentPage] = useState(1);
-  const [selectedTransaction, setSelectedTransaction] = useState<Transaction | null>(null);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [copiedRef, setCopiedRef] = useState<string | null>(null);
-  const itemsPerPage = 10;
+  const [selectedTransaction, setSelectedTransaction] = useState<Transaction | null>(null);
 
-  useEffect(() => {
+    useEffect(() => {
     const fetchTransactions = async () => {
+      const token = localStorage.getItem('token');
+      if (!token) {
+        setError('No authentication token found');
+        setLoading(false);
+        return;
+      }
+
       try {
-        const token = localStorage.getItem('token');
-        if (!token) {
-          throw new Error('No authentication token found');
-        }
-
-        const response = await axios.get<ApiResponse>(`${process.env.NEXT_PUBLIC_API_URL}/admin/transactions/list?page_size=10000000000000`, {
-          headers: {
-            Authorization: `Bearer ${token}`
+        const response = await transactionCache.getOrFetch<ApiResponse>(
+          'recent_transactions',
+          async () => {
+            const axiosResponse = await axios.get<ApiResponse>(`${process.env.NEXT_PUBLIC_API_URL}/admin/transactions/list?page_size=5`, {
+              headers: {
+                Authorization: `Bearer ${token}`
+              }
+            });
+            return axiosResponse.data;
           }
-        });
+        );
 
-        if (response.data.success && Array.isArray(response.data.data)) {
-          setTransactions(response.data.data);
+        if (response.success && Array.isArray(response.data)) {
+          // Get only the first 5 most recent transactions
+          setTransactions(response.data.slice(0, 5));
+          setError(null);
         } else {
-          throw new Error(response.data.message || 'Failed to fetch transactions');
+          throw new Error(response.message || 'Failed to fetch transactions');
         }
-      } catch (err) {
-        if (axios.isAxiosError(err)) {
-          setError(err.response?.data?.message || 'Failed to fetch transactions');
-        } else {
-          setError(err instanceof Error ? err.message : 'Failed to fetch transactions');
-        }
+      } catch (err: any) {
+        console.error('TransactionList fetch error:', err);
+        setError(err.message || 'Failed to fetch transactions');
       } finally {
         setLoading(false);
       }
@@ -130,13 +110,13 @@ export default function TransactionList() {
   const getStatusColor = (status: string) => {
     switch (status.toLowerCase()) {
       case "successful":
-        return "bg-green-100 text-green-800";
+        return "bg-green-100 text-green-700";
       case "failed":
-        return "bg-red-100 text-red-800";
+        return "bg-red-100 text-red-700";
       case "pending":
-        return "bg-amber-100 text-amber-800";
+        return "bg-amber-100 text-amber-700";
       default:
-        return "bg-gray-100 text-gray-800";
+        return "bg-gray-100 text-gray-700";
     }
   };
 
@@ -151,237 +131,199 @@ export default function TransactionList() {
     }
   };
 
-  const filteredTransactions = transactions.filter((transaction) => {
-    const matchesSearch = 
-      (transaction.transaction_reference?.toLowerCase() || '').includes(search.toLowerCase()) ||
-      (transaction.description?.toLowerCase() || '').includes(search.toLowerCase()) ||
-      (transaction.wallet?.owners_fullname?.toLowerCase() || '').includes(search.toLowerCase());
-    
-    const matchesStatus = statusFilter === "all" || transaction.transaction_status.toLowerCase() === statusFilter.toLowerCase();
-    const matchesType = typeFilter === "all" || transaction.transaction_type.toLowerCase() === typeFilter.toLowerCase();
-
-    return matchesSearch && matchesStatus && matchesType;
-  });
-
-  const totalPages = Math.ceil(filteredTransactions.length / itemsPerPage);
-  const startIndex = (currentPage - 1) * itemsPerPage;
-  const paginatedTransactions = filteredTransactions.slice(startIndex, startIndex + itemsPerPage);
-
   const shortenReference = (ref: string) => {
-    if (ref.length <= 12) return ref;
-    return `${ref.slice(0, 4)}.....${ref.slice(-4)}`;
+    if (ref.length <= 16) return ref;
+    return `${ref.slice(0, 6)}...${ref.slice(-6)}`;
   };
 
-  const copyToClipboard = (text: string) => {
-    navigator.clipboard.writeText(text);
+  const copyToClipboard = async (text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
     setCopiedRef(text);
     setTimeout(() => setCopiedRef(null), 2000);
+    } catch (err) {
+      console.error('Failed to copy text: ', err);
+    }
   };
 
   if (loading) {
-    return (
-      <div className="bg-card rounded-lg shadow-sm overflow-hidden border border-border/40">
-        <div className="p-6">
-          <div className="flex flex-col sm:flex-row gap-4 mb-6">
-            <Skeleton className="h-10 flex-1" />
-            <Skeleton className="h-10 w-[180px]" />
-            <Skeleton className="h-10 w-[180px]" />
-          </div>
-          <div className="rounded-md border">
-            <div className="p-4">
-              <div className="space-y-4">
-                {[...Array(5)].map((_, i) => (
-                  <div key={i} className="flex items-center space-x-4">
-                    <Skeleton className="h-12 w-full" />
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    );
+    return <TransactionTableSkeleton />;
   }
 
   if (error) {
     return (
-      <div className="bg-card rounded-lg shadow-sm overflow-hidden border border-border/40 p-6">
-        <div className="flex items-center justify-center h-32">
-          <p className="text-destructive">{error}</p>
+      <div className="bg-card rounded-md shadow-sm border border-border/40">
+        <div className="p-4">
+          <h3 className="text-base font-semibold mb-2">Recent Transactions</h3>
+          <div className="text-red-500 text-sm">{error}</div>
         </div>
       </div>
     );
   }
 
   return (
-    <>
-      <div className="bg-card rounded-lg shadow-sm overflow-hidden border border-border/40">
-        <div className="p-6">
-          <div className="flex flex-col sm:flex-row gap-4 mb-6">
-            <div className="flex-1">
-              <div className="relative">
-                <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
-                <Input
-                  placeholder="Search transactions..."
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  className="pl-8"
-                />
-              </div>
-            </div>
-            <Select value={statusFilter} onValueChange={setStatusFilter}>
-              <SelectTrigger className="w-[180px]">
-                <SelectValue placeholder="Filter by status" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Status</SelectItem>
-                <SelectItem value="successful">Successful</SelectItem>
-                <SelectItem value="failed">Failed</SelectItem>
-                <SelectItem value="pending">Pending</SelectItem>
-              </SelectContent>
-            </Select>
-            <Select value={typeFilter} onValueChange={setTypeFilter}>
-              <SelectTrigger className="w-[180px]">
-                <SelectValue placeholder="Filter by type" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Types</SelectItem>
-                <SelectItem value="credit">Credit</SelectItem>
-                <SelectItem value="debit">Debit</SelectItem>
-              </SelectContent>
-            </Select>
+    <div className="bg-card rounded-md shadow-sm border border-border/40">
+      <div className="p-4">
+        <h3 className="text-base font-semibold mb-4">Recent Transactions</h3>
+        
+        {transactions.length === 0 ? (
+          <div className="text-center py-8 text-muted-foreground">
+            <p className="text-sm">No transactions found</p>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {transactions.map((transaction) => (
+                             <div
+                 key={transaction.transaction_id}
+                 className="flex items-center justify-between p-2 border rounded-md hover:bg-muted/50 transition-colors cursor-pointer"
+                 onClick={() => setSelectedTransaction(transaction)}
+               >
+                                 {/* Left side - User/Date and Reference/Description */}
+                 <div className="flex items-center gap-2 min-w-0 flex-1">
+                   {/* User and Date stacked */}
+                   <div className="min-w-0 w-24 sm:w-28">
+                     <p className="text-xs font-medium text-foreground truncate">
+                       {(transaction.wallet?.owners_fullname || 'Unknown User').split(' ')[0]}
+                     </p>
+                     <p className="text-xs text-muted-foreground">
+                       {format(new Date(transaction.created_at), 'MMM dd')}
+                     </p>
           </div>
 
-          <div className="rounded-md border">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Date</TableHead>
-                  <TableHead>User</TableHead>
-                  <TableHead>Reference</TableHead>
-                  <TableHead>Description</TableHead>
-                  <TableHead>Amount</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead className="w-[50px]"></TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {paginatedTransactions.map((transaction) => (
-                  <TableRow key={transaction.transaction_id}>
-                    <TableCell>{format(new Date(transaction.created_at), 'MMM d, yyyy HH:mm')}</TableCell>
-                    <TableCell>{transaction.wallet?.owners_fullname || 'N/A'}</TableCell>
-                    <TableCell className="font-mono text-sm">
-                      <div className="flex items-center gap-2">
-                        <TooltipProvider>
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <span>{shortenReference(transaction.transaction_reference)}</span>
-                            </TooltipTrigger>
-                            <TooltipContent>
-                              <p>{transaction.transaction_reference}</p>
-                            </TooltipContent>
-                          </Tooltip>
-                        </TooltipProvider>
-                        <TooltipProvider>
-                          <Tooltip>
-                            <TooltipTrigger asChild>
+                   {/* Reference and Description stacked */}
+                   <div className="min-w-0 flex-1">
+                     <div className="flex items-center gap-1">
+                       <p className="text-xs text-muted-foreground font-mono truncate max-w-[80px]">
+                         {shortenReference(transaction.transaction_reference)}
+                       </p>
                               <Button
                                 variant="ghost"
-                                size="icon"
-                                className="h-6 w-6"
+                         size="sm"
+                         className="h-3 w-3 p-0 hover:bg-muted flex-shrink-0"
                                 onClick={() => copyToClipboard(transaction.transaction_reference)}
                               >
                                 {copiedRef === transaction.transaction_reference ? (
-                                  <Check className="h-3 w-3 text-green-500" />
+                           <Check className="h-2.5 w-2.5 text-green-600" />
                                 ) : (
-                                  <Copy className="h-3 w-3" />
+                           <Copy className="h-2.5 w-2.5 text-muted-foreground" />
                                 )}
                               </Button>
-                            </TooltipTrigger>
-                            <TooltipContent>
-                              <p>{copiedRef === transaction.transaction_reference ? 'Copied!' : 'Copy reference'}</p>
-                            </TooltipContent>
-                          </Tooltip>
-                        </TooltipProvider>
+                     </div>
+                     <p className="text-xs font-medium text-foreground truncate">
+                       {transaction.description.length > 25 ? transaction.description.substring(0, 25) + '...' : transaction.description}
+                     </p>
                       </div>
-                    </TableCell>
-                    <TableCell>
-                      <TooltipProvider>
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <span className="truncate max-w-[200px] block">
-                              {transaction.description}
-                            </span>
-                          </TooltipTrigger>
-                          <TooltipContent>
-                            <p>{transaction.description}</p>
-                          </TooltipContent>
-                        </Tooltip>
-                      </TooltipProvider>
-                    </TableCell>
-                    <TableCell className={getTypeColor(transaction.transaction_type)}>
-                      ₦{parseFloat(transaction.amount).toLocaleString()}
-                    </TableCell>
-                    <TableCell>
-                      <Badge className={getStatusColor(transaction.transaction_status)}>
-                        {transaction.transaction_status}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button variant="ghost" size="icon" className="h-8 w-8">
-                            <MoreVertical className="h-4 w-4" />
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                          <DropdownMenuItem onClick={() => setSelectedTransaction(transaction)}>
-                            View details
-                          </DropdownMenuItem>
-                          <DropdownMenuSeparator />
-                          <DropdownMenuItem>Reverse transaction</DropdownMenuItem>
-                          <DropdownMenuItem>Generate receipt</DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
           </div>
 
-          <div className="flex items-center justify-between mt-4">
-            <p className="text-sm text-muted-foreground">
-              Showing {startIndex + 1} to {Math.min(startIndex + itemsPerPage, filteredTransactions.length)} of {filteredTransactions.length} transactions
-            </p>
-            <div className="flex items-center gap-2">
-              <Button
-                variant="outline"
-                size="icon"
-                onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-                disabled={currentPage === 1}
-              >
-                <ChevronLeft className="h-4 w-4" />
-              </Button>
-              <Button
-                variant="outline"
-                size="icon"
-                onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
-                disabled={currentPage === totalPages}
-              >
-                <ChevronRight className="h-4 w-4" />
-              </Button>
+                                 {/* Right side - Amount and Status */}
+                 <div className="text-right min-w-0">
+                   <p className={`text-xs font-semibold ${getTypeColor(transaction.transaction_type)}`}>
+                     {transaction.transaction_type.toUpperCase() === 'CREDIT' ? '+' : '-'}
+                     ₦{parseFloat(transaction.amount).toLocaleString()}
+                   </p>
+                   <Badge 
+                     className={`text-[10px] px-1.5 py-0.5 ${getStatusColor(transaction.transaction_status)}`}
+                     variant="secondary"
+                   >
+                     {transaction.transaction_status}
+                   </Badge>
+                 </div>
             </div>
+            ))}
           </div>
+        )}
+
+        {/* View More Button */}
+        <div className="mt-4 text-center">
+          <Link href="/dashboard/transactions">
+            <Button variant="outline" size="sm">
+              View All Transactions
+              <ArrowUpRight className="ml-2 h-3 w-3" />
+            </Button>
+          </Link>
         </div>
       </div>
 
-      <TransactionDetailsModal
-        isOpen={!!selectedTransaction}
-        onClose={() => setSelectedTransaction(null)}
-        transaction={selectedTransaction}
-        style={{ margin: '40px 20px 40px 40px' }}
-      />
-    </>
+      {/* Transaction Details Modal */}
+      <Dialog open={!!selectedTransaction} onOpenChange={() => setSelectedTransaction(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Transaction Details</DialogTitle>
+          </DialogHeader>
+          {selectedTransaction && (
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <p className="text-sm font-medium text-muted-foreground">User</p>
+                  <p className="text-sm">{selectedTransaction.wallet?.owners_fullname || 'Unknown User'}</p>
+                </div>
+                <div>
+                  <p className="text-sm font-medium text-muted-foreground">Date</p>
+                  <p className="text-sm">{format(new Date(selectedTransaction.created_at), 'MMM dd, yyyy HH:mm')}</p>
+                </div>
+              </div>
+
+              <div>
+                <p className="text-sm font-medium text-muted-foreground">Amount</p>
+                <p className={`text-lg font-semibold ${getTypeColor(selectedTransaction.transaction_type)}`}>
+                  {selectedTransaction.transaction_type.toUpperCase() === 'CREDIT' ? '+' : '-'}
+                  ₦{parseFloat(selectedTransaction.amount).toLocaleString()}
+                </p>
+              </div>
+
+              <div>
+                <p className="text-sm font-medium text-muted-foreground">Status</p>
+                <Badge className={`${getStatusColor(selectedTransaction.transaction_status)}`} variant="secondary">
+                  {selectedTransaction.transaction_status}
+                </Badge>
+              </div>
+
+              <div>
+                <p className="text-sm font-medium text-muted-foreground">Reference</p>
+                <div className="flex items-center gap-2">
+                  <p className="text-sm font-mono bg-muted p-2 rounded flex-1 break-all">
+                    {selectedTransaction.transaction_reference}
+                  </p>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => copyToClipboard(selectedTransaction.transaction_reference)}
+                  >
+                    {copiedRef === selectedTransaction.transaction_reference ? (
+                      <Check className="h-3 w-3 text-green-600" />
+                    ) : (
+                      <Copy className="h-3 w-3" />
+                    )}
+                  </Button>
+                </div>
+              </div>
+
+              <div>
+                <p className="text-sm font-medium text-muted-foreground">Description</p>
+                <p className="text-sm bg-muted p-2 rounded">{selectedTransaction.description}</p>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <p className="text-sm font-medium text-muted-foreground">Type</p>
+                  <p className="text-sm">{selectedTransaction.transaction_type}</p>
+                </div>
+                <div>
+                  <p className="text-sm font-medium text-muted-foreground">Provider</p>
+                  <p className="text-sm">{selectedTransaction.payment_provider}</p>
+                </div>
+              </div>
+
+              {selectedTransaction.wallet?.bank && (
+                <div>
+                  <p className="text-sm font-medium text-muted-foreground">Bank</p>
+                  <p className="text-sm">{selectedTransaction.wallet.bank}</p>
+                </div>
+              )}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+    </div>
   );
 }

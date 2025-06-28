@@ -1,64 +1,78 @@
 "use client";
 
 import { useState } from "react";
-import { TrendingUp } from "lucide-react";
-import { CartesianGrid, Line, LineChart, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceDot } from "recharts";
+import { CartesianGrid, Area, AreaChart, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
 import { Button } from "@/components/ui/button";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   Card,
   CardContent,
-  CardDescription,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
 
 // Sample data - in a real app, this would come from an API
 const data = [
-  { name: "Apr 14", deposits: 10, withdrawals: 800, users: 100, referrals: 125 },
-  { name: "Apr 15", deposits: 1500, withdrawals: 1200, users: 190, referrals: 8 },
-  { name: "Apr 16", deposits: 1300, withdrawals: 900, users: 115, referrals: 126 },
-  { name: "Apr 17", deposits: 1800, withdrawals: 1500, users: 140, referrals: 12 },
-  { name: "Apr 18", deposits: 1600, withdrawals: 10, users: 135, referrals: 200 },
-  { name: "Apr 19", deposits: 2000, withdrawals: 1800, users: 60, referrals: 15 },
-  { name: "Apr 20", deposits: 200, withdrawals: 20, users: 180, referrals: 148 },
+  { name: "Apr 14", balance: 2400000, deposits: 150000, withdrawals: 80000, users: 100, referrals: 125 },
+  { name: "Apr 15", balance: 2650000, deposits: 250000, withdrawals: 120000, users: 190, referrals: 8 },
+  { name: "Apr 16", balance: 2580000, deposits: 130000, withdrawals: 200000, users: 115, referrals: 126 },
+  { name: "Apr 17", balance: 2780000, deposits: 380000, withdrawals: 180000, users: 140, referrals: 12 },
+  { name: "Apr 18", balance: 2950000, deposits: 320000, withdrawals: 150000, users: 135, referrals: 200 },
+  { name: "Apr 19", balance: 3200000, deposits: 450000, withdrawals: 200000, users: 160, referrals: 15 },
+  { name: "Apr 20", balance: 3150000, deposits: 200000, withdrawals: 250000, users: 180, referrals: 148 },
 ];
 
 const timeRanges = [
-  { value: '1D', label: '1D' },
-  { value: '3D', label: '3D' },
-  { value: '1W', label: '1W' },
+  { value: '1W', label: '7D' },
   { value: '1M', label: '1M' },
   { value: '3M', label: '3M' },
   { value: '6M', label: '6M' },
   { value: '1Y', label: '1Y' },
 ];
 
-const customTooltip = ({ active, payload, label }: any) => {
-  if (active && payload && payload.length) {
-    return (
-      <div className="bg-white p-2 border border-gray-200 rounded shadow-sm text-xs">
-        <p className="font-medium text-gray-900 mb-1">{label}</p>
-        <p className="text-green-800">
-          <span className="inline-block w-2 h-2 rounded-full bg-green-400 mr-1"></span>
-          Deposits: ₦{payload[0].value.toLocaleString()}
-        </p>
-        <p className="text-amber-800">
-          <span className="inline-block w-2 h-2 rounded-full bg-amber-400 mr-1"></span>
-          Withdrawals: ₦{payload[1].value.toLocaleString()}
-        </p>
-        <p className="text-blue-800">
-          <span className="inline-block w-2 h-2 rounded-full bg-blue-400 mr-1"></span>
-          Users: {payload[2].value}
-        </p>
-        <p className="text-purple-800">
-          <span className="inline-block w-2 h-2 rounded-full bg-purple-400 mr-1"></span>
-          Referrals: {payload[3].value}
-        </p>
-      </div>
-    );
-  }
-  return null;
-};
+const chartMetrics = [
+  { 
+    value: 'balance', 
+    label: 'Wallet Balance', 
+    dataKey: 'balance',
+    formatValue: (value: number) => `₦${(value / 1000000).toFixed(1)}M`,
+    tooltipLabel: 'Total Balance'
+  },
+  { 
+    value: 'deposits', 
+    label: 'Deposits', 
+    dataKey: 'deposits',
+    formatValue: (value: number) => `₦${(value / 1000).toFixed(0)}K`,
+    tooltipLabel: 'Deposits'
+  },
+  { 
+    value: 'withdrawals', 
+    label: 'Withdrawals', 
+    dataKey: 'withdrawals',
+    formatValue: (value: number) => `₦${(value / 1000).toFixed(0)}K`,
+    tooltipLabel: 'Withdrawals'
+  },
+  { 
+    value: 'users', 
+    label: 'Active Users', 
+    dataKey: 'users',
+    formatValue: (value: number) => value.toString(),
+    tooltipLabel: 'Users'
+  },
+  { 
+    value: 'referrals', 
+    label: 'Referrals', 
+    dataKey: 'referrals',
+    formatValue: (value: number) => value.toString(),
+    tooltipLabel: 'Referrals'
+  },
+];
 
 interface FinanceChartProps {
   legendItems?: {
@@ -70,115 +84,108 @@ interface FinanceChartProps {
 
 const FinanceChart = ({ legendItems }: FinanceChartProps) => {
   const [timeRange, setTimeRange] = useState('1W');
-  
-  // Find the highest value point for the reference dot
-  const peakPoint = data.reduce(
-    (max, point) => {
-      if (point.deposits > max.value) {
-        return { value: point.deposits, name: point.name, dataKey: 'deposits' };
-      }
-      if (point.withdrawals > max.value) {
-        return { value: point.withdrawals, name: point.name, dataKey: 'withdrawals' };
-      }
-      return max;
-    },
-    { value: 0, name: '', dataKey: 'deposits' }
-  );
+  const [selectedMetric, setSelectedMetric] = useState('balance');
+
+  const currentMetric = chartMetrics.find(metric => metric.value === selectedMetric) || chartMetrics[0];
+
+  const customTooltip = ({ active, payload, label }: any) => {
+    if (active && payload && payload.length) {
+      const value = payload[0].value;
+      return (
+        <div className="bg-background border border-border rounded-lg shadow-lg p-3">
+          <p className="font-medium text-foreground mb-1 text-sm">{label}</p>
+          <p className="text-[#64D600] font-semibold text-sm">
+            <span className="inline-block w-2 h-2 rounded-full bg-[#64D600] mr-2"></span>
+            {currentMetric.tooltipLabel}: {currentMetric.formatValue(value)}
+          </p>
+        </div>
+      );
+    }
+    return null;
+  };
 
   return (
     <Card>
-      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-        <div className="flex gap-2">
-          {timeRanges.map((range) => (
-            <Button
-              key={range.value}
-              variant={timeRange === range.value ? "default" : "ghost"}
-              size="sm"
-              onClick={() => setTimeRange(range.value)}
-              className="px-3 py-1 h-8"
-            >
-              {range.label}
-            </Button>
-          ))}
+      <CardHeader className="pb-3">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <CardTitle className="text-lg font-semibold">Financial Overview</CardTitle>
+          
+          <div className="flex items-center gap-3">
+            {/* Metric Selector Dropdown */}
+            <Select value={selectedMetric} onValueChange={setSelectedMetric}>
+              <SelectTrigger className="w-[140px] h-8 text-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {chartMetrics.map((metric) => (
+                  <SelectItem key={metric.value} value={metric.value} className="text-xs">
+                    {metric.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            
+            {/* Time Range Buttons */}
+            <div className="flex gap-1">
+              {timeRanges.map((range) => (
+                <Button
+                  key={range.value}
+                  variant={timeRange === range.value ? "default" : "ghost"}
+                  size="sm"
+                  onClick={() => setTimeRange(range.value)}
+                  className="px-2 py-1 h-7 text-xs"
+                >
+                  {range.label}
+                </Button>
+              ))}
+            </div>
+          </div>
         </div>
       </CardHeader>
+      
       <CardContent>
-        <div className="h-[280px] mt-4">
+        <div className="h-[200px]">
           <ResponsiveContainer width="100%" height="100%">
-            <LineChart
+            <AreaChart
               data={data}
-              margin={{ top: 10, right: 10, left: -20, bottom: 0 }}
+              margin={{ top: 5, right: 5, left: 0, bottom: 5 }}
             >
-              <CartesianGrid strokeDasharray="3 3" stroke="#f1f1f1" vertical={false} />
+              <defs>
+                <linearGradient id="primaryGradient" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="#64D600" stopOpacity={0.4}/>
+                  <stop offset="95%" stopColor="#64D600" stopOpacity={0.05}/>
+                </linearGradient>
+              </defs>
+              <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
               <XAxis 
                 dataKey="name" 
                 axisLine={false}
                 tickLine={false}
-                tick={{ fontSize: 12, fill: '#98A2B3' }}
+                tick={{ fontSize: 11, fill: '#64748b' }}
               />
               <YAxis 
                 axisLine={false}
                 tickLine={false}
-                tick={{ fontSize: 12, fill: '#98A2B3' }}
-                tickFormatter={(value) => value === 0 ? '₦0' : `₦${Math.floor(value / 1000)}K`}
-              />
-              <YAxis 
-                yAxisId="users"
-                orientation="right"
-                axisLine={false}
-                tickLine={false}
-                tick={{ fontSize: 12, fill: '#98A2B3' }}
+                tick={{ fontSize: 11, fill: '#64748b' }}
+                tickFormatter={currentMetric.formatValue}
+                width={60}
               />
               <Tooltip content={customTooltip} />
-              <Line
+              <Area
                 type="monotone"
-                dataKey="deposits"
-                stroke="#4ADE80"
-                strokeWidth={2}
+                dataKey={currentMetric.dataKey}
+                stroke="#64D600"
+                strokeWidth={2.5}
+                fill="url(#primaryGradient)"
                 dot={false}
-                activeDot={{ r: 6, fill: '#4ADE80', stroke: '#fff', strokeWidth: 2 }}
-              />
-              <Line
-                type="monotone"
-                dataKey="withdrawals"
-                stroke="#FBB344"
-                strokeWidth={2}
-                dot={false}
-                activeDot={{ r: 6, fill: '#FBB344', stroke: '#fff', strokeWidth: 2 }}
-              />
-              <Line
-                yAxisId="users"
-                type="monotone"
-                dataKey="users"
-                stroke="#60A5FA"
-                strokeWidth={2}
-                dot={false}
-                activeDot={{ r: 6, fill: '#60A5FA', stroke: '#fff', strokeWidth: 2 }}
-              />
-              <Line
-                yAxisId="users"
-                type="monotone"
-                dataKey="referrals"
-                stroke="#A855F7"
-                strokeWidth={2}
-                dot={false}
-                activeDot={{ r: 6, fill: '#A855F7', stroke: '#fff', strokeWidth: 2 }}
-              />
-              <ReferenceDot
-                x={peakPoint.name}
-                y={peakPoint.value}
-                r={4}
-                fill="#fff"
-                stroke={peakPoint.dataKey === 'deposits' ? '#4ADE80' : '#FBB344'}
-                strokeWidth={2}
-                label={{
-                  value: `₦${peakPoint.value.toLocaleString()}`,
-                  position: 'top',
-                  fill: '#333',
-                  fontSize: 12
+                activeDot={{ 
+                  r: 5, 
+                  fill: '#64D600', 
+                  stroke: '#fff', 
+                  strokeWidth: 2 
                 }}
               />
-            </LineChart>
+            </AreaChart>
           </ResponsiveContainer>
         </div>
       </CardContent>

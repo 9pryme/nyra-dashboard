@@ -9,6 +9,11 @@ const config: Config = {
   ],
   theme: {
     extend: {
+      fontFamily: {
+        'clash': ['var(--font-clash-display)', 'system-ui', 'sans-serif'],
+        'sora': ['Sora', 'system-ui', 'sans-serif'],
+        'sans': ['Sora', 'system-ui', 'sans-serif'],
+      },
       backgroundImage: {
         'gradient-radial': 'radial-gradient(var(--tw-gradient-stops))',
         'gradient-conic':

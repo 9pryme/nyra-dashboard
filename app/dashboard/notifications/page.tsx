@@ -30,28 +30,24 @@ export default function NotificationsPage() {
         <MetricCard 
           title="Total Notifications" 
           value="1,250" 
-          icon={<Bell className="h-5 w-5" />}
           change={12.5}
           changeType="increase"
         />
         <MetricCard 
           title="Total Emails" 
           value="850" 
-          icon={<Mail className="h-5 w-5" />}
           change={8.3}
           changeType="increase"
         />
         <MetricCard 
           title="Active Users" 
           value="2,500" 
-          icon={<Users className="h-5 w-5" />}
           change={5.2}
           changeType="increase"
         />
         <MetricCard 
           title="Engagement Rate" 
           value="68%" 
-          icon={<MessageSquare className="h-5 w-5" />}
           change={3.1}
           changeType="increase"
         />

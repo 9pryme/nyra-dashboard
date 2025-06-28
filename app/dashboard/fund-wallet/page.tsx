@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import axios from "axios";
 import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -24,7 +23,7 @@ import {
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { AlertCircle, CheckCircle2, Search, ChevronDown, ReceiptText, PlusCircle } from "lucide-react";
+import { AlertCircle, CheckCircle2, ChevronDown, ReceiptText, PlusCircle, Copy, Check, RefreshCw } from "lucide-react";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import {
@@ -39,15 +38,18 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
+import { userService, User, UserBalance } from "@/lib/services/user";
+import { apiCache } from "@/lib/cache";
 
-interface User {
+interface CreditTransaction {
+  id: string;
   user_id: string;
-  first_name: string;
-  last_name: string;
-  email: string;
-  phone_number: string;
-  wallet_id: string;
-  wallet_balance?: string;
+  user_name: string;
+  amount: number;
+  description: string;
+  status: string;
+  created_at: string;
+  admin_id?: string;
 }
 
 export default function FundWalletPage() {
@@ -55,49 +57,102 @@ export default function FundWalletPage() {
   const [filteredUsers, setFilteredUsers] = useState<User[]>([]);
   const [searchValue, setSearchValue] = useState("");
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
+  const [userBalance, setUserBalance] = useState<UserBalance | null>(null);
   const [amount, setAmount] = useState("");
   const [description, setDescription] = useState("Wallet credit");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [formSuccess, setFormSuccess] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
   const [loadingUsers, setLoadingUsers] = useState(true);
+  const [loadingHistory, setLoadingHistory] = useState(true);
+  const [loadingBalance, setLoadingBalance] = useState(false);
   const [open, setOpen] = useState(false);
+  const [creditHistory, setCreditHistory] = useState<CreditTransaction[]>([]);
+  const [copiedUserId, setCopiedUserId] = useState<string | null>(null);
   
   const { toast } = useToast();
 
-  useEffect(() => {
-    const fetchData = async () => {
-      try {
-        const token = localStorage.getItem('token');
-        if (!token) {
-          throw new Error('No authentication token found');
-        }
+  const fetchUsers = async () => {
+    try {
+      setLoadingUsers(true);
+      const usersList = await userService.getAllUsers();
+      setUsers(usersList);
+      setFilteredUsers(usersList);
+    } catch (err) {
+      setFormError(err instanceof Error ? err.message : 'Failed to load users');
+    } finally {
+      setLoadingUsers(false);
+    }
+  };
 
-        // Fetch users
-        const usersResponse = await axios.get(
-          `${process.env.NEXT_PUBLIC_API_URL}/user-admin/list?page_size=100000`, 
+  const fetchUserBalance = async (userId: string) => {
+    try {
+      setLoadingBalance(true);
+      const balance = await userService.getUserBalance(userId);
+      setUserBalance(balance);
+    } catch (err) {
+      console.error('Failed to fetch user balance:', err);
+      setUserBalance(null);
+    } finally {
+      setLoadingBalance(false);
+    }
+  };
+
+  const fetchCreditHistory = async () => {
+    try {
+      const token = localStorage.getItem('token');
+      if (!token) return;
+
+      // Simple caching with fallback
+      let response;
+      try {
+        response = await apiCache?.getOrFetch(
+          'wallet-credit-history',
+          async () => {
+            const res = await fetch(
+              `${process.env.NEXT_PUBLIC_API_URL}/admin/wallet/credits/history?limit=50`,
+              {
+                headers: { Authorization: `Bearer ${token}` }
+              }
+            );
+            return res.json();
+          },
+          2 * 60 * 1000 // 2 minutes
+        );
+      } catch (cacheError) {
+        // Fallback to direct API call if cache fails
+        console.warn('Cache failed, using direct API call:', cacheError);
+        const res = await fetch(
+          `${process.env.NEXT_PUBLIC_API_URL}/admin/wallet/credits/history?limit=50`,
           {
             headers: { Authorization: `Bearer ${token}` }
           }
         );
-        
-        if (usersResponse.data.success) {
-          setUsers(usersResponse.data.data);
-          setFilteredUsers(usersResponse.data.data);
-        }
-      } catch (err) {
-        if (axios.isAxiosError(err)) {
-          setFormError(err.response?.data?.message || 'Failed to load data');
-        } else {
-          setFormError(err instanceof Error ? err.message : 'An error occurred');
-        }
-      } finally {
-        setLoadingUsers(false);
+        response = await res.json();
       }
-    };
 
-    fetchData();
+      if (response?.success) {
+        setCreditHistory(response.data || []);
+      }
+    } catch (err) {
+      console.error('Failed to fetch credit history:', err);
+    } finally {
+      setLoadingHistory(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchUsers();
+    fetchCreditHistory();
   }, []);
+
+  useEffect(() => {
+    if (selectedUser) {
+      fetchUserBalance(selectedUser.user_id);
+    } else {
+      setUserBalance(null);
+    }
+  }, [selectedUser]);
 
   // Filter users based on search input
   useEffect(() => {
@@ -108,10 +163,11 @@ export default function FundWalletPage() {
     
     const query = searchValue.toLowerCase();
     const filtered = users.filter(user => 
-      (user.first_name?.toLowerCase() || '').includes(query) ||
-      (user.last_name?.toLowerCase() || '').includes(query) ||
+      (user.firstname?.toLowerCase() || '').includes(query) ||
+      (user.lastname?.toLowerCase() || '').includes(query) ||
       (user.email?.toLowerCase() || '').includes(query) ||
-      (user.phone_number || '').includes(query)
+      (user.phone_number || '').includes(query) ||
+      (user.user_id?.toLowerCase() || '').includes(query)
     );
     
     setFilteredUsers(filtered);
@@ -125,8 +181,14 @@ export default function FundWalletPage() {
       return;
     }
     
-    if (!amount || parseFloat(amount) <= 0) {
-      setFormError("Please enter a valid amount");
+    const amountNum = parseFloat(amount);
+    if (!amount || amountNum <= 0) {
+      setFormError("Please enter a valid amount greater than 0");
+      return;
+    }
+
+    if (amountNum > 1000000) {
+      setFormError("Amount cannot exceed ₦1,000,000");
       return;
     }
     
@@ -135,62 +197,82 @@ export default function FundWalletPage() {
     setFormError(null);
     
     try {
-      const token = localStorage.getItem('token');
-      if (!token) {
-        throw new Error('No authentication token found');
-      }
+      await userService.fundUserWallet(selectedUser.user_id, amountNum, description || "Wallet credit");
       
-      const response = await axios.post(
-        `${process.env.NEXT_PUBLIC_API_URL}/admin/wallet/user/${selectedUser.user_id}/credit`,
-        {
-          amount: parseFloat(amount),
-          description: description || "Wallet credit"
-        },
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          }
-        }
-      );
+      setFormSuccess(`Successfully credited ₦${amountNum.toLocaleString()} to ${userService.getUserDisplayName(selectedUser)}'s wallet`);
+      toast({
+        title: "Success",
+        description: `Wallet credited with ₦${amountNum.toLocaleString()}`,
+      });
       
-      if (response.data.success) {
-        setFormSuccess("Wallet credited successfully");
-        toast({
-          title: "Success",
-          description: "Wallet has been credited successfully",
-        });
-        
-        // Reset form
-        setSelectedUser(null);
-        setAmount("");
-        setDescription("Wallet credit");
-      } else {
-        throw new Error(response.data.message || 'Failed to credit wallet');
-      }
+      // Reset form
+      setSelectedUser(null);
+      setUserBalance(null);
+      setAmount("");
+      setDescription("Wallet credit");
+      
+      // Refresh history
+      fetchCreditHistory();
     } catch (err) {
-      if (axios.isAxiosError(err)) {
-        setFormError(err.response?.data?.message || 'Failed to credit wallet');
-      } else {
-        setFormError(err instanceof Error ? err.message : 'An error occurred');
-      }
+      const errorMessage = err instanceof Error ? err.message : 'Failed to credit wallet';
+      setFormError(errorMessage);
       
       toast({
         title: "Error",
-        description: err instanceof Error ? err.message : 'Failed to credit wallet',
+        description: errorMessage,
         variant: "destructive",
       });
     } finally {
       setIsSubmitting(false);
     }
   };
+
+  const handleRefreshHistory = async () => {
+    setLoadingHistory(true);
+    try {
+      apiCache?.invalidate('wallet-credit-history');
+    } catch (cacheError) {
+      console.warn('Cache invalidation failed:', cacheError);
+    }
+    await fetchCreditHistory();
+  };
+
+  const copyUserId = (userId: string) => {
+    navigator.clipboard.writeText(userId);
+    setCopiedUserId(userId);
+    setTimeout(() => setCopiedUserId(null), 2000);
+  };
   
-  const formatCurrency = (amount: string) => {
+  const formatCurrency = (amount: string | number) => {
     return new Intl.NumberFormat('en-NG', {
       style: 'currency',
       currency: 'NGN',
       minimumFractionDigits: 2
-    }).format(parseFloat(amount));
+    }).format(typeof amount === 'string' ? parseFloat(amount) : amount);
+  };
+
+  const formatDate = (dateString: string) => {
+    return new Date(dateString).toLocaleDateString('en-US', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+  };
+
+  const getStatusBadge = (status: string) => {
+    switch (status.toLowerCase()) {
+      case 'success':
+      case 'completed':
+        return <Badge variant="secondary" className="bg-green-100 text-green-800">Success</Badge>;
+      case 'failed':
+        return <Badge variant="destructive">Failed</Badge>;
+      case 'pending':
+        return <Badge variant="outline">Pending</Badge>;
+      default:
+        return <Badge variant="outline">{status}</Badge>;
+    }
   };
 
   return (
@@ -234,11 +316,11 @@ export default function FundWalletPage() {
                         aria-expanded={open}
                         className="w-full justify-between"
                       >
-                        {selectedUser ? `${selectedUser.first_name} ${selectedUser.last_name}` : "Select user..."}
+                        {selectedUser ? userService.getUserDisplayName(selectedUser) : "Select user..."}
                         <ChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                       </Button>
                     </PopoverTrigger>
-                    <PopoverContent className="w-[300px] p-0">
+                    <PopoverContent className="w-[350px] p-0">
                       <Command>
                         <CommandInput 
                           placeholder="Search users..." 
@@ -264,10 +346,13 @@ export default function FundWalletPage() {
                                 className="flex flex-col items-start py-2"
                               >
                                 <div className="font-medium">
-                                  {user.first_name} {user.last_name}
+                                  {userService.getUserDisplayName(user)}
                                 </div>
                                 <div className="text-xs text-muted-foreground">
                                   {user.email || 'No email'} • {user.phone_number || 'No phone'}
+                                </div>
+                                <div className="text-xs text-muted-foreground">
+                                  ID: {user.user_id}
                                 </div>
                               </CommandItem>
                             ))
@@ -281,15 +366,34 @@ export default function FundWalletPage() {
                 {selectedUser && (
                   <div className="p-3 border rounded-md bg-muted/50">
                     <div className="font-medium">
-                      {selectedUser.first_name} {selectedUser.last_name}
+                      {userService.getUserDisplayName(selectedUser)}
                     </div>
                     <div className="text-sm text-muted-foreground">
                       {selectedUser.email} • {selectedUser.phone_number}
                     </div>
-                    {selectedUser.wallet_balance && (
-                      <div className="text-sm mt-1">
-                        Balance: {formatCurrency(selectedUser.wallet_balance)}
+                    <div className="flex items-center gap-2 text-sm text-muted-foreground mt-1">
+                      <span>ID: {selectedUser.user_id}</span>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-4 w-4 p-0"
+                        onClick={() => copyUserId(selectedUser.user_id)}
+                      >
+                        {copiedUserId === selectedUser.user_id ? (
+                          <Check className="h-3 w-3 text-green-600" />
+                        ) : (
+                          <Copy className="h-3 w-3" />
+                        )}
+                      </Button>
+                    </div>
+                    {loadingBalance ? (
+                      <div className="text-sm mt-1 text-muted-foreground">Loading balance...</div>
+                    ) : userBalance ? (
+                      <div className="text-sm mt-1 font-medium">
+                        Balance: {formatCurrency(userBalance.balance)}
                       </div>
+                    ) : (
+                      <div className="text-sm mt-1 text-muted-foreground">Balance: Not available</div>
                     )}
                   </div>
                 )}
@@ -302,7 +406,11 @@ export default function FundWalletPage() {
                     placeholder="Enter amount to credit"
                     value={amount}
                     onChange={(e) => setAmount(e.target.value)}
+                    min="1"
+                    max="1000000"
+                    step="0.01"
                   />
+                  <p className="text-xs text-muted-foreground">Maximum amount: ₦1,000,000</p>
                 </div>
                 
                 <div className="space-y-2">
@@ -312,6 +420,7 @@ export default function FundWalletPage() {
                     placeholder="Reason for credit"
                     value={description}
                     onChange={(e) => setDescription(e.target.value)}
+                    maxLength={200}
                   />
                 </div>
                 
@@ -324,8 +433,8 @@ export default function FundWalletPage() {
                 )}
                 
                 {formSuccess && (
-                  <Alert variant="default" className="bg-green-50 text-green-800 border-green-200">
-                    <CheckCircle2 className="h-4 w-4 text-green-600" />
+                  <Alert variant="default" className="bg-green-50 text-green-800 border-green-200 dark:bg-green-900/20 dark:text-green-400 dark:border-green-800">
+                    <CheckCircle2 className="h-4 w-4 text-green-600 dark:text-green-400" />
                     <AlertTitle>Success</AlertTitle>
                     <AlertDescription>{formSuccess}</AlertDescription>
                   </Alert>
@@ -336,7 +445,7 @@ export default function FundWalletPage() {
               <Button 
                 type="submit" 
                 className="w-full" 
-                disabled={isSubmitting || !selectedUser}
+                disabled={isSubmitting || !selectedUser || !amount}
                 onClick={handleSubmit}
               >
                 {isSubmitting ? "Processing..." : "Fund Wallet"}
@@ -354,36 +463,78 @@ export default function FundWalletPage() {
         >
           <Card className="h-full">
             <CardHeader>
-              <CardTitle>Credit Transaction History</CardTitle>
-              <CardDescription>
-                Recent wallet credits performed by administrators.
-              </CardDescription>
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle>Credit Transaction History</CardTitle>
+                  <CardDescription>
+                    Recent wallet credits performed by administrators.
+                  </CardDescription>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleRefreshHistory}
+                  disabled={loadingHistory}
+                >
+                  <RefreshCw className={`h-4 w-4 ${loadingHistory ? 'animate-spin' : ''}`} />
+                </Button>
+              </div>
             </CardHeader>
             <CardContent>
-              <div className="rounded-md border">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Date</TableHead>
-                      <TableHead>User</TableHead>
-                      <TableHead>Amount</TableHead>
-                      <TableHead>Description</TableHead>
-                      <TableHead>Status</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {/* Empty state - no rows */}
-                  </TableBody>
-                </Table>
-              </div>
-              
-              <div className="flex flex-col items-center justify-center py-12 text-center">
-                <ReceiptText className="h-12 w-12 text-muted-foreground mb-4 opacity-30" />
-                <h3 className="text-lg font-medium mb-1">No transaction history</h3>
-                <p className="text-sm text-muted-foreground max-w-sm">
-                  Transaction history will be available once the logging system is implemented.
-                </p>
-              </div>
+              {loadingHistory ? (
+                <div className="flex items-center justify-center py-12">
+                  <div className="text-center">
+                    <RefreshCw className="h-8 w-8 animate-spin mx-auto mb-4 text-muted-foreground" />
+                    <p className="text-sm text-muted-foreground">Loading transaction history...</p>
+                  </div>
+                </div>
+              ) : creditHistory.length > 0 ? (
+                <div className="rounded-md border">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Date</TableHead>
+                        <TableHead>User</TableHead>
+                        <TableHead>Amount</TableHead>
+                        <TableHead>Description</TableHead>
+                        <TableHead>Status</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {creditHistory.map((transaction) => (
+                        <TableRow key={transaction.id}>
+                          <TableCell className="text-sm">
+                            {formatDate(transaction.created_at)}
+                          </TableCell>
+                          <TableCell>
+                            <div className="font-medium">{transaction.user_name}</div>
+                            <div className="text-xs text-muted-foreground">
+                              {transaction.user_id}
+                            </div>
+                          </TableCell>
+                          <TableCell className="font-medium">
+                            {formatCurrency(transaction.amount)}
+                          </TableCell>
+                          <TableCell className="max-w-[200px] truncate">
+                            {transaction.description}
+                          </TableCell>
+                          <TableCell>
+                            {getStatusBadge(transaction.status)}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              ) : (
+                <div className="flex flex-col items-center justify-center py-12 text-center">
+                  <ReceiptText className="h-12 w-12 text-muted-foreground mb-4 opacity-30" />
+                  <h3 className="text-lg font-medium mb-1">No transaction history</h3>
+                  <p className="text-sm text-muted-foreground max-w-sm">
+                    Credit transactions will appear here once you start funding user wallets.
+                  </p>
+                </div>
+              )}
             </CardContent>
           </Card>
         </motion.div>

@@ -30,7 +30,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Copy, MoreVertical, Search, ChevronLeft, ChevronRight } from "lucide-react";
+import { Copy, MoreVertical, Search, ChevronLeft, ChevronRight, Check } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import {
@@ -43,6 +43,7 @@ import {
 import axios from "axios";
 import { format } from "date-fns";
 import { Skeleton } from "@/components/ui/skeleton";
+import { apiCache } from "@/lib/cache";
 
 interface User {
   created_at: string;
@@ -80,6 +81,7 @@ export default function UsersTable({ loading }: UsersTableProps) {
   const [error, setError] = useState<string | null>(null);
   const [showRestrictDialog, setShowRestrictDialog] = useState(false);
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
+  const [copiedItems, setCopiedItems] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     const fetchUsers = async () => {
@@ -200,8 +202,20 @@ export default function UsersTable({ loading }: UsersTableProps) {
     return `${cleanId.slice(0, 5)}...${cleanId.slice(-4)}`;
   };
 
-  const copyToClipboard = (text: string) => {
+  const copyToClipboard = (text: string, label: string) => {
     navigator.clipboard.writeText(text);
+    
+    const itemKey = `${label}-${text}`;
+    setCopiedItems(prev => new Set(prev).add(itemKey));
+    
+    // Revert back to copy icon after 2 seconds
+    setTimeout(() => {
+      setCopiedItems(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(itemKey);
+        return newSet;
+      });
+    }, 2000);
   };
 
   if (loading) {
@@ -329,10 +343,18 @@ export default function UsersTable({ loading }: UsersTableProps) {
                       <Button
                         variant="ghost"
                         size="icon"
-                        className="h-6 w-6"
-                        onClick={() => copyToClipboard(user.user_id)}
+                        className={`h-6 w-6 transition-colors ${
+                          copiedItems.has(`user_id-${user.user_id}`) 
+                            ? 'bg-green-50 border-green-200 hover:bg-green-100 dark:bg-green-950 dark:border-green-800' 
+                            : ''
+                        }`}
+                        onClick={() => copyToClipboard(user.user_id, 'user_id')}
                       >
-                        <Copy className="h-3 w-3" />
+                        {copiedItems.has(`user_id-${user.user_id}`) ? (
+                          <Check className="h-3 w-3 text-green-600 dark:text-green-400" />
+                        ) : (
+                          <Copy className="h-3 w-3" />
+                        )}
                       </Button>
                     </div>
                   </TableCell>

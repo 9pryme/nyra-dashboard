@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react";
 import axios from "axios";
 import UserProfileContent from "./UserProfileContent";
+import { apiCache } from "@/lib/cache";
+import NyraLoading from "@/components/ui/nyra-loading";
 
 interface UserData {
   created_at: string;
@@ -11,6 +13,7 @@ interface UserData {
   balance: string;
   total_credit: string;
   total_debit: string;
+  frozen: boolean;
   owner: {
     user_id: string;
     email: string;
@@ -23,6 +26,7 @@ interface UserData {
     account_number: string;
     owners_fullname: string;
     bank: string;
+    frozen: boolean;
   }>;
 }
 
@@ -44,41 +48,57 @@ export default function UserProfileClient({ userId }: UserProfileClientProps) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    const fetchUserData = async () => {
-      try {
-        const token = localStorage.getItem('token');
-        if (!token) {
-          throw new Error('No authentication token found');
-        }
+  const fetchUserData = async (forceRefresh = false) => {
+    const token = localStorage.getItem('token');
+    if (!token) {
+      setError('No authentication token found');
+      setLoading(false);
+      return;
+    }
 
-        const response = await axios.get<ApiResponse>(`${process.env.NEXT_PUBLIC_API_URL}/admin/wallet/${userId}/user`, {
-          headers: {
-            Authorization: `Bearer ${token}`
-          }
-        });
-
-        if (response.data.success) {
-          setUserData(response.data.data);
-        } else {
-          throw new Error(response.data.message || 'Failed to fetch user data');
-        }
-      } catch (err) {
-        if (axios.isAxiosError(err)) {
-          setError(err.response?.data?.message || 'Failed to fetch user data');
-        } else {
-          setError(err instanceof Error ? err.message : 'Failed to fetch user data');
-        }
-      } finally {
-        setLoading(false);
+    try {
+      // Clear cache if force refresh is requested
+      if (forceRefresh) {
+        apiCache.invalidate(`user_data_${userId}`);
       }
-    };
 
+      const response = await apiCache.getOrFetch<ApiResponse>(
+        `user_data_${userId}`,
+        async () => {
+          const axiosResponse = await axios.get<ApiResponse>(`${process.env.NEXT_PUBLIC_API_URL}/admin/wallet/${userId}/user`, {
+            headers: {
+              Authorization: `Bearer ${token}`
+            }
+          });
+          return axiosResponse.data;
+        }
+      );
+
+      if (response.success) {
+        setUserData(response.data);
+        setError(null);
+      } else {
+        throw new Error(response.message || 'Failed to fetch user data');
+      }
+    } catch (err: any) {
+      console.error('UserProfile fetch error:', err);
+      setError(err.message || 'Failed to fetch user data');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const refreshUserData = () => {
+    setLoading(true);
+    fetchUserData(true);
+  };
+
+  useEffect(() => {
     fetchUserData();
   }, [userId]);
 
   if (loading) {
-    return <div className="p-6">Loading...</div>;
+    return <NyraLoading size="md" className="min-h-[50vh]" />;
   }
 
   if (error || !userData) {
@@ -96,7 +116,8 @@ export default function UserProfileClient({ userId }: UserProfileClientProps) {
       day: 'numeric',
       year: 'numeric'
     }),
-    status: userData.owner.active_status
+    status: userData.owner.active_status,
+    frozen: userData.frozen
   };
 
   const walletData = {
@@ -105,13 +126,17 @@ export default function UserProfileClient({ userId }: UserProfileClientProps) {
     totalDebit: parseFloat(userData.total_debit),
     totalTransactions: 0, // Not provided in API
     totalReferrals: 0, // Not provided in API
-    referralEarnings: 0 // Not provided in API
+    referralEarnings: 0, // Not provided in API
+    frozen: userData.frozen
   };
 
   const accountNumbers = userData.sub_wallets.reduce((acc, wallet) => {
-    acc[wallet.bank] = wallet.account_number;
+    if (!acc[wallet.bank]) {
+      acc[wallet.bank] = [];
+    }
+    acc[wallet.bank].push(wallet.account_number);
     return acc;
-  }, {} as Record<string, string>);
+  }, {} as Record<string, string[]>);
 
   return (
     <UserProfileContent 
@@ -119,6 +144,7 @@ export default function UserProfileClient({ userId }: UserProfileClientProps) {
       userData={formattedUserData}
       walletData={walletData}
       accountNumbers={accountNumbers}
+      onRefresh={refreshUserData}
     />
   );
 } 

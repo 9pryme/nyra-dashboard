@@ -1,78 +1,35 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import axios from "axios";
 import { Wallet, CircleDollarSign, ArrowUpRight, ArrowDownRight } from "lucide-react";
 import { motion } from "framer-motion";
 import MetricCard from "@/components/dashboard/MetricCard";
 import WalletList from "@/components/dashboard/WalletList";
-
-interface WalletSummary {
-  total_balance: string;
-  total_credit: string;
-  total_debit: string;
-  total_credit_count: string;
-  total_debit_count: string;
-}
-
-interface WalletOwner {
-  user_id: string;
-  email: string;
-  phone_number: string;
-  username: string;
-  firstname: string;
-  lastname: string;
-  middlename?: string;
-  active_status: string;
-  account_tier?: number;
-  role?: string;
-  email_verified?: boolean;
-  phone_verified?: boolean;
-}
-
-interface WalletData {
-  wallet_id: string;
-  balance: string;
-  total_credit: string;
-  total_debit: string;
-  frozen: boolean;
-  wallet_pin_changed?: boolean;
-  owner: WalletOwner;
-  created_at: string;
-  updated_at?: string;
-}
+import { walletService, WalletData, WalletSummary, WalletAnalytics } from "@/lib/services/wallet";
 
 export default function ManageWalletsPage() {
   const [walletSummary, setWalletSummary] = useState<WalletSummary | null>(null);
   const [wallets, setWallets] = useState<WalletData[]>([]);
+  const [walletAnalytics, setWalletAnalytics] = useState<WalletAnalytics | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     const fetchWalletData = async () => {
       try {
-        const token = localStorage.getItem('token');
-        if (!token) {
-          throw new Error('No authentication token found');
-        }
-
-        // Fetch wallet summary
-        const [summaryResponse, walletsResponse] = await Promise.all([
-          axios.get(`${process.env.NEXT_PUBLIC_API_URL}/wallet/summary`, {
-            headers: { Authorization: `Bearer ${token}` }
-          }),
-          axios.get(`${process.env.NEXT_PUBLIC_API_URL}/admin/wallet/users?page_size=2000000`, {
-            headers: { Authorization: `Bearer ${token}` }
-          })
+        // Fetch wallet summary and wallets using the service
+        const [summary, walletsData] = await Promise.all([
+          walletService.fetchWalletSummary(),
+          walletService.fetchWallets()
         ]);
 
-        if (summaryResponse.data.success) {
-          setWalletSummary(summaryResponse.data.data[0]);
-        }
-
-        if (walletsResponse.data.success) {
-          setWallets(walletsResponse.data.data);
-        }
+        setWalletSummary(summary);
+        setWallets(walletsData);
+        
+        // Calculate analytics from the actual wallet data
+        const analytics = walletService.calculateWalletAnalytics(walletsData);
+        setWalletAnalytics(analytics);
+        
       } catch (err) {
         console.error('Error fetching wallet data:', err);
         setError(err instanceof Error ? err.message : 'An error occurred');
@@ -84,15 +41,7 @@ export default function ManageWalletsPage() {
     fetchWalletData();
   }, []);
 
-  const formatCurrency = (amount: string) => {
-    const numAmount = parseFloat(amount);
-    return new Intl.NumberFormat('en-NG', {
-      style: 'currency',
-      currency: 'NGN',
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    }).format(numAmount);
-  };
+
 
   if (loading) {
     return (
@@ -141,31 +90,27 @@ export default function ManageWalletsPage() {
       >
         <MetricCard 
           title="Total Wallets" 
-          value={wallets ? wallets.length.toString() : "0"} 
-          icon={<Wallet className="h-5 w-5" />}
-          change={0}
-          changeType="increase"
+          value={walletAnalytics ? walletAnalytics.totalWallets.toString() : "0"} 
+          change={walletAnalytics ? walletAnalytics.weeklyChanges.totalWalletsChange : 0}
+          changeType={walletAnalytics && walletAnalytics.weeklyChanges.totalWalletsChange >= 0 ? "increase" : "decrease"}
         />
         <MetricCard 
-          title="Total Balance" 
-          value={walletSummary ? formatCurrency(walletSummary.total_balance) : "₦0.00"} 
-          icon={<CircleDollarSign className="h-5 w-5" />}
-          change={0}
-          changeType="increase"
+          title="Calculated Total Balance" 
+          value={walletAnalytics ? walletService.formatVolume(walletAnalytics.calculatedTotalBalance) : "₦0.00"} 
+          change={walletAnalytics ? walletAnalytics.weeklyChanges.balanceChange : 0}
+          changeType={walletAnalytics && walletAnalytics.weeklyChanges.balanceChange >= 0 ? "increase" : "decrease"}
         />
         <MetricCard 
-          title="Total Credits" 
-          value={walletSummary ? formatCurrency(walletSummary.total_credit) : "₦0.00"} 
-          icon={<ArrowUpRight className="h-5 w-5" />}
-          change={0}
-          changeType="increase"
+          title="Active Wallets" 
+          value={walletAnalytics ? walletAnalytics.activeWallets.toString() : "0"} 
+          change={walletAnalytics ? walletAnalytics.weeklyChanges.activeWalletsChange : 0}
+          changeType={walletAnalytics && walletAnalytics.weeklyChanges.activeWalletsChange >= 0 ? "increase" : "decrease"}
         />
         <MetricCard 
-          title="Total Debits" 
-          value={walletSummary ? formatCurrency(walletSummary.total_debit) : "₦0.00"} 
-          icon={<ArrowDownRight className="h-5 w-5" />}
-          change={0}
-          changeType="increase"
+          title="Frozen Wallets" 
+          value={walletAnalytics ? walletAnalytics.frozenWallets.toString() : "0"} 
+          change={walletAnalytics ? Math.abs(walletAnalytics.weeklyChanges.frozenWalletsChange) : 0}
+          changeType={walletAnalytics && walletAnalytics.weeklyChanges.frozenWalletsChange <= 0 ? "increase" : "decrease"}
         />
       </motion.div>
 

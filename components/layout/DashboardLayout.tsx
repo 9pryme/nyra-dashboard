@@ -1,14 +1,12 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import Sidebar from "@/components/layout/Sidebar";
+import Sidebar, { SidebarProvider, useSidebar } from "@/components/layout/Sidebar";
 import TopBar from "@/components/layout/TopBar";
+import { cn } from "@/lib/utils";
 
-export default function DashboardLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
+function DashboardContent({ children }: { children: React.ReactNode }) {
+  const { isCollapsed } = useSidebar();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isMounted, setIsMounted] = useState(false);
 
@@ -22,33 +20,52 @@ export default function DashboardLayout({
 
   return (
     <div className="min-h-screen bg-background flex">
-      {/* Sidebar for desktop */}
-      <div className="hidden md:block fixed left-0 top-0 h-screen">
+      {/* Desktop Sidebar */}
+      <div className="hidden lg:block">
         <Sidebar />
       </div>
 
-      {/* Mobile sidebar */}
+      {/* Mobile Overlay */}
       {isMobileMenuOpen && (
-        <div className="fixed inset-0 z-50 flex md:hidden">
+        <div className="fixed inset-0 z-40 lg:hidden">
           <div 
-            className="fixed inset-0 bg-black/50" 
+            className="fixed inset-0 bg-black/50 backdrop-blur-sm" 
             onClick={() => setIsMobileMenuOpen(false)}
           />
-          <div className="relative w-64 max-w-xs">
-            <Sidebar isMobile onCloseMobile={() => setIsMobileMenuOpen(false)} />
+          <div className="relative w-52 max-w-xs h-full">
+            <Sidebar className="relative" />
           </div>
         </div>
       )}
 
-      {/* Main content */}
-      <div className="flex-1 flex flex-col md:pl-64">
+      {/* Main content area */}
+      <div className={cn(
+        "flex-1 flex flex-col transition-all duration-300",
+        "lg:ml-0", // Remove margin on large screens since sidebar is positioned fixed
+        isCollapsed ? "lg:pl-14" : "lg:pl-52" // Add padding based on sidebar state
+      )}>
         <TopBar 
           onMobileMenuClick={() => setIsMobileMenuOpen(true)}
+          className="sticky top-0 z-30"
         />
-        <main className="flex-1">
-          {children}
+        <main className="flex-1 p-4 lg:p-6 overflow-auto min-w-0">
+          <div className="max-w-full">
+            {children}
+          </div>
         </main>
       </div>
     </div>
+  );
+}
+
+export default function DashboardLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  return (
+    <SidebarProvider>
+      <DashboardContent>{children}</DashboardContent>
+    </SidebarProvider>
   );
 }

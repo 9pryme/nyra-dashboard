@@ -1,37 +1,150 @@
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { FileText, Shield, Wallet, History } from "lucide-react";
+import { FileText, Shield, Wallet, History, Lock, Unlock } from "lucide-react";
+import { useState } from "react";
+import { apiCache } from "@/lib/cache";
+import axios from "axios";
+import { useToast } from "@/hooks/use-toast";
+import UserKycModal from "./UserKycModal";
 
 interface UserActionsProps {
   userId: string;
+  frozen: boolean;
+  onFrozenUpdate?: (frozen: boolean) => void;
+  userName?: string;
 }
 
-export default function UserActions({ userId }: UserActionsProps) {
+export default function UserActions({ userId, frozen, onFrozenUpdate, userName }: UserActionsProps) {
+  const [isLoading, setIsLoading] = useState(false);
+  const [isKycModalOpen, setIsKycModalOpen] = useState(false);
+  const { toast } = useToast();
+
+  // If currently frozen, we want to unfreeze (freeze=false)
+  // If currently not frozen, we want to freeze (freeze=true)
+  const shouldFreeze = !frozen;
+
+  const handleFreezeUnfreeze = async () => {
+    setIsLoading(true);
+    
+    try {
+      const token = localStorage.getItem('token');
+      if (!token) {
+        throw new Error('No authentication token found');
+      }
+
+      const response = await apiCache.getOrFetch<any>(
+        `freeze_wallet_${userId}_${shouldFreeze}_${Date.now()}`, // Add timestamp to avoid stale cache
+        async () => {
+          const axiosResponse = await axios.post(
+            `${process.env.NEXT_PUBLIC_API_URL}/admin/wallet/freeze?user_id=${userId}&freeze=${shouldFreeze}`,
+            {},
+            {
+              headers: {
+                Authorization: `Bearer ${token}`
+              }
+            }
+          );
+          return axiosResponse.data;
+        },
+        60000, // 1 minute cache for this action
+        true // Force refresh to ensure latest action
+      );
+
+      if (response.success) {
+        // Update the frozen status based on the action taken
+        onFrozenUpdate?.(shouldFreeze);
+        
+        // Invalidate related cache entries
+        apiCache.invalidate(`user_data_${userId}`);
+        
+        toast({
+          title: "Success",
+          description: `Wallet ${shouldFreeze ? 'frozen' : 'unfrozen'} successfully`,
+        });
+      } else {
+        throw new Error(response.message || `Failed to ${shouldFreeze ? 'freeze' : 'unfreeze'} wallet`);
+      }
+    } catch (err: any) {
+      console.error('Freeze/Unfreeze error:', err);
+      toast({
+        title: "Error",
+        description: err.message || `Failed to ${shouldFreeze ? 'freeze' : 'unfreeze'} wallet`,
+        variant: "destructive",
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-lg font-semibold">Actions</CardTitle>
-      </CardHeader>
-      <CardContent>
-        <div className="flex flex-col gap-3">
-          <Button variant="outline" className="justify-start bg-blue-50 hover:bg-blue-100">
-            <FileText className="mr-2 h-4 w-4 text-blue-600" />
-            View KYC Docs
-          </Button>
-          <Button variant="outline" className="justify-start bg-red-50 hover:bg-red-100">
-            <Shield className="mr-2 h-4 w-4 text-red-600" />
-            PND
-          </Button>
-          <Button variant="outline" className="justify-start bg-green-50 hover:bg-green-100">
-            <Wallet className="mr-2 h-4 w-4 text-green-600" />
-            Upgrade Wallet
-          </Button>
-          <Button variant="outline" className="justify-start bg-purple-50 hover:bg-purple-100">
-            <History className="mr-2 h-4 w-4 text-purple-600" />
-            Audit Log
-          </Button>
-        </div>
-      </CardContent>
-    </Card>
+    <>
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg font-semibold">Actions</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="flex flex-col gap-3">
+            <Button 
+              variant="outline" 
+              className="justify-start bg-blue-50 hover:bg-blue-100 dark:bg-blue-950 dark:hover:bg-blue-900 dark:text-blue-300 dark:border-blue-800"
+              onClick={() => setIsKycModalOpen(true)}
+            >
+              <FileText className="mr-2 h-4 w-4 text-blue-600 dark:text-blue-400" />
+              <span className="text-blue-700 dark:text-blue-300">View KYC Docs</span>
+            </Button>
+            
+            <Button 
+              variant="outline" 
+              className={`justify-start ${
+                frozen 
+                  ? 'bg-green-50 hover:bg-green-100 dark:bg-green-950 dark:hover:bg-green-900 dark:border-green-800' 
+                  : 'bg-red-50 hover:bg-red-100 dark:bg-red-950 dark:hover:bg-red-900 dark:border-red-800'
+              }`}
+              onClick={handleFreezeUnfreeze}
+              disabled={isLoading}
+            >
+              {frozen ? (
+                <>
+                  <Unlock className="mr-2 h-4 w-4 text-green-600 dark:text-green-400" />
+                  <span className="text-green-700 dark:text-green-300">
+                    {isLoading ? 'Unfreezing...' : 'Unfreeze Wallet'}
+                  </span>
+                </>
+              ) : (
+                <>
+                  <Lock className="mr-2 h-4 w-4 text-red-600 dark:text-red-400" />
+                  <span className="text-red-700 dark:text-red-300">
+                    {isLoading ? 'Freezing...' : 'Freeze Wallet'}
+                  </span>
+                </>
+              )}
+            </Button>
+            
+            <Button 
+              variant="outline" 
+              className="justify-start bg-green-50 hover:bg-green-100 dark:bg-green-950 dark:hover:bg-green-900 dark:text-green-300 dark:border-green-800"
+            >
+              <Wallet className="mr-2 h-4 w-4 text-green-600 dark:text-green-400" />
+              <span className="text-green-700 dark:text-green-300">Upgrade Wallet</span>
+            </Button>
+            
+            <Button 
+              variant="outline" 
+              className="justify-start bg-purple-50 hover:bg-purple-100 dark:bg-purple-950 dark:hover:bg-purple-900 dark:text-purple-300 dark:border-purple-800"
+            >
+              <History className="mr-2 h-4 w-4 text-purple-600 dark:text-purple-400" />
+              <span className="text-purple-700 dark:text-purple-300">Audit Log</span>
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      <UserKycModal
+        isOpen={isKycModalOpen}
+        onClose={() => setIsKycModalOpen(false)}
+        userId={userId}
+        userName={userName || 'User'}
+      />
+    </>
   );
 }

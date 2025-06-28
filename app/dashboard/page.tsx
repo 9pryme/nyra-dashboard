@@ -7,10 +7,17 @@ import WalletCard from "@/components/dashboard/WalletCard";
 import FinanceChart from "@/components/dashboard/FinanceChart";
 import TransactionList from "@/components/dashboard/TransactionList";
 import ServiceManagement from "@/components/dashboard/ServiceManagement";
-import { ArrowUpRight, Wallet, CircleDollarSign, Users, ScrollText } from "lucide-react";
+import { ArrowUpRight } from "lucide-react";
 import { motion } from "framer-motion";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
+import { DashboardSkeleton } from "@/components/ui/skeleton-loader";
+import { dashboardCache } from "@/lib/cache";
+import NyraLoading from "@/components/ui/nyra-loading";
+import { apiCache } from "@/lib/cache";
+import { useGlobalLoading } from "@/hooks/use-global-loading";
+import { walletService, WalletAnalytics } from "@/lib/services/wallet";
+import { analyticsService, TransactionAnalytics } from "@/lib/services/analytics";
 
 interface WalletSummary {
   total_balance: string;
@@ -20,80 +27,79 @@ interface WalletSummary {
   total_debit_count: string;
 }
 
-interface TransactionAnalytics {
-  today: {
-    categories: Record<string, number>;
-    electronic: number;
-    total_debit: number;
-    total_credit: number;
-    total_charges_external: number;
-    total_charges_internal: number;
-  };
-  yesteday: {
-    categories: Record<string, number>;
-    electronic: number;
-    total_debit: number;
-    total_credit: number;
-    total_charges_external: number;
-    total_charges_internal: number;
-  };
-  current_month: {
-    categories: Record<string, number>;
-    electronic: number;
-    total_debit: number;
-    total_credit: number;
-    total_charges_external: number;
-    total_charges_internal: number;
-  };
-  last_month: {
-    categories: Record<string, number>;
-    electronic: number;
-    total_debit: number;
-    total_credit: number;
-  };
-  current_year: {
-    categories: Record<string, number>;
-    electronic: number;
-    total_debit: number;
-    total_credit: number;
-    total_charges_external: number;
-    total_charges_internal: number;
-  };
-  last_year: null;
-}
-
 export default function DashboardPage() {
   const [walletSummary, setWalletSummary] = useState<WalletSummary | null>(null);
   const [transactionAnalytics, setTransactionAnalytics] = useState<TransactionAnalytics | null>(null);
+  const [walletAnalytics, setWalletAnalytics] = useState<WalletAnalytics | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const { isLoading: globalLoading } = useGlobalLoading();
 
   useEffect(() => {
     const fetchData = async () => {
-      try {
-        const token = localStorage.getItem('token');
-        if (!token) {
-          throw new Error('No authentication token found');
-        }
+      const token = localStorage.getItem('token');
+      if (!token) {
+        setError('No authentication token found');
+        setLoading(false);
+        return;
+      }
 
-        const [walletResponse, analyticsResponse] = await Promise.all([
-          axios.get(`${process.env.NEXT_PUBLIC_API_URL}/wallet/summary`, {
-            headers: { Authorization: `Bearer ${token}` }
-          }),
-          axios.get(`${process.env.NEXT_PUBLIC_API_URL}/analytics/transactions/recent`, {
-            headers: { Authorization: `Bearer ${token}` }
-          })
+      try {
+        // Fetch wallet summary and wallets data first (critical)
+        const [walletSummary, walletsData] = await Promise.all([
+          dashboardCache.getOrFetch<any>(
+            'wallet_summary',
+            async () => {
+              const response = await axios.get(`${process.env.NEXT_PUBLIC_API_URL}/wallet/summary`, {
+                headers: { Authorization: `Bearer ${token}` }
+              });
+              return response.data;
+            }
+          ),
+          dashboardCache.getOrFetch<any>(
+            'dashboard_wallets',
+            async () => {
+              return await walletService.fetchWallets();
+            }
+          )
         ]);
 
-        if (walletResponse.data.success) {
-          setWalletSummary(walletResponse.data.data[0]);
+        if (walletSummary.success) {
+          setWalletSummary(walletSummary.data[0]);
         }
 
-        if (analyticsResponse.data.success) {
-          setTransactionAnalytics(analyticsResponse.data.data);
+        // Calculate wallet analytics from actual wallet data
+        if (walletsData) {
+          const walletStats = walletService.calculateWalletAnalytics(walletsData);
+          setWalletAnalytics(walletStats);
         }
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to fetch dashboard data');
+
+        // Fetch analytics separately with timeout and fallback
+        try {
+          const analyticsPromise = analyticsService.fetchRecentAnalytics();
+          const timeoutPromise = new Promise((_, reject) => 
+            setTimeout(() => reject(new Error('Analytics timeout')), 5000)
+          );
+          
+          const analytics = await Promise.race([analyticsPromise, timeoutPromise]) as TransactionAnalytics;
+          setTransactionAnalytics(analytics);
+        } catch (analyticsError) {
+          console.warn('Analytics fetch failed, using fallback:', analyticsError);
+          // Set fallback analytics data to prevent UI from breaking
+          setTransactionAnalytics({
+            today: { categories: {}, electronic: 0, total_debit: 0, total_credit: 0 },
+            yesteday: { categories: {}, electronic: 0, total_debit: 0, total_credit: 0 },
+            current_month: { categories: {}, electronic: 0, total_debit: 0, total_credit: 0 },
+            last_month: null,
+            current_year: { categories: {}, electronic: 0, total_debit: 0, total_credit: 0 },
+            last_year: null
+          });
+        }
+
+        setError(null);
+      } catch (err: any) {
+        console.error('Dashboard fetch error:', err);
+        setError(err.message || 'Failed to fetch dashboard data');
       } finally {
         setLoading(false);
       }
@@ -102,105 +108,69 @@ export default function DashboardPage() {
     fetchData();
   }, []);
 
-  const formatCurrency = (amount: string | number) => {
-    const numAmount = typeof amount === 'string' ? parseFloat(amount) : amount;
-    return new Intl.NumberFormat('en-NG', {
-      style: 'currency',
-      currency: 'NGN',
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    }).format(numAmount);
-  };
-
-  const legendItems = [
-    {
-      label: "Deposits",
-      color: "bg-green-400",
-      indicator: "bg-green-100 text-green-800"
-    },
-    {
-      label: "Withdrawals", 
-      color: "bg-amber-400",
-      indicator: "bg-amber-100 text-amber-800"
-    },
-    {
-      label: "Users",
-      color: "bg-blue-400",
-      indicator: "bg-blue-100 text-blue-800"
-    },
-    {
-      label: "Referrals",
-      color: "bg-purple-400", 
-      indicator: "bg-purple-100 text-purple-800"
-    }
-  ];
-
-  if (loading) {
-    return (
-      <div className="p-6 space-y-6">
-        <div className="animate-pulse">
-          <div className="h-8 w-64 bg-gray-200 rounded mb-2"></div>
-          <div className="h-4 w-48 bg-gray-200 rounded"></div>
-        </div>
-        {/* Add more loading skeletons as needed */}
-      </div>
-    );
+  // Don't show local loading if global loading is active
+  if (loading && !globalLoading) {
+    return <NyraLoading size="lg" className="min-h-[60vh]" />;
   }
 
   if (error) {
     return (
-      <div className="p-6">
+      <div className="max-w-full">
         <div className="text-red-500">{error}</div>
       </div>
     );
   }
 
+  // Calculate changes using analytics service with fallback
+  const dailyChanges = transactionAnalytics ? analyticsService.calculateDailyChanges(transactionAnalytics) : {
+    volumeChange: 0,
+    creditChange: 0, 
+    debitChange: 0,
+    transactionCountChange: 0
+  };
+
   return (
-    <div className="p-6 space-y-6">
+    <div className="space-y-3 lg:space-y-4 max-w-full">
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.5 }}
       >
-        <h1 className="text-2xl font-bold tracking-[-0.02em]">Welcome to Nyra!</h1>
-        <p className="text-muted-foreground">Today is a great day to make money.</p>
+        <h1 className="text-xl lg:text-2xl">Welcome to Nyra!</h1>
+        <p className="text-muted-foreground mt-1 text-sm">Today is a great day to make money.</p>
       </motion.div>
       
-      <div className="flex flex-col lg:flex-row gap-6">
-        <div className="flex-1 space-y-6">
+      <div className="flex flex-col xl:flex-row gap-3 min-w-0">
+        <div className="flex-1 space-y-3 lg:space-y-4 min-w-0">
           <motion.div 
-            className="grid grid-cols-1 md:grid-cols-4 gap-6"
+            className="grid grid-cols-2 lg:grid-cols-4 gap-2"
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.5, delay: 0.2 }}
           >
             <MetricCard 
               title="All User Wallet Balance" 
-              value={walletSummary ? formatCurrency(walletSummary.total_balance) : '₦0.00'} 
-              icon={<Wallet className="h-5 w-5" />}
-              change={12.5}
-              changeType="increase"
+              value={walletAnalytics ? walletService.formatVolume(walletAnalytics.calculatedTotalBalance) : '₦0.00'} 
+              change={walletAnalytics ? walletAnalytics.weeklyChanges.balanceChange : 0}
+              changeType={walletAnalytics && walletAnalytics.weeklyChanges.balanceChange >= 0 ? "increase" : "decrease"}
             />
             <MetricCard 
-              title="Total Fees" 
-              value={transactionAnalytics ? formatCurrency(transactionAnalytics.current_month.total_charges_internal + transactionAnalytics.current_month.total_charges_external) : '₦0.00'} 
-              icon={<CircleDollarSign className="h-5 w-5" />}
-              change={5.2}
-              changeType="increase"
+              title="Today's Volume" 
+              value={transactionAnalytics ? analyticsService.formatVolume(transactionAnalytics.today.total_credit + transactionAnalytics.today.total_debit) : '₦0.00'} 
+              change={Math.abs(dailyChanges.volumeChange)}
+              changeType={dailyChanges.volumeChange >= 0 ? "increase" : "decrease"}
             />
             <MetricCard 
               title="Total Users" 
-              value={walletSummary ? (parseInt(walletSummary.total_credit_count) + parseInt(walletSummary.total_debit_count)).toString() : '0'} 
-              icon={<Users className="h-5 w-5" />}
-              change={15.8}
-              changeType="increase"
+              value={walletAnalytics ? walletAnalytics.totalWallets.toString() : '0'} 
+              change={walletAnalytics ? walletAnalytics.weeklyChanges.totalWalletsChange : 0}
+              changeType={walletAnalytics && walletAnalytics.weeklyChanges.totalWalletsChange >= 0 ? "increase" : "decrease"}
             />
             <MetricCard 
-              title="Total Transactions" 
-              value={walletSummary ? (parseInt(walletSummary.total_credit_count) + parseInt(walletSummary.total_debit_count)).toString() : '0'} 
-              icon={<ScrollText className="h-5 w-5" />}
-              change={8.3}
-              changeType="increase"
+              title="Today's Transactions" 
+              value={transactionAnalytics ? analyticsService.formatCount(transactionAnalytics.today.electronic) : '0'} 
+              change={Math.abs(dailyChanges.transactionCountChange)}
+              changeType={dailyChanges.transactionCountChange >= 0 ? "increase" : "decrease"}
             />
           </motion.div>
           
@@ -209,18 +179,7 @@ export default function DashboardPage() {
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.5, delay: 0.4 }}
           >
-            <div className="flex justify-between items-center mb-6">
-              <h2 className="text-xl font-semibold tracking-[-0.015em]">Account Activity</h2>
-              <div className="flex items-center space-x-2">
-                {legendItems.map((item) => (
-                  <span key={item.label} className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${item.indicator}`}>
-                    <span className={`h-2 w-2 mr-1 rounded-full ${item.color}`}></span>
-                    {item.label}
-                  </span>
-                ))}
-              </div>
-            </div>
-            <FinanceChart legendItems={legendItems} />
+            <FinanceChart />
           </motion.div>
           
           <motion.div
@@ -229,19 +188,11 @@ export default function DashboardPage() {
             transition={{ duration: 0.5, delay: 0.6 }}
           >
             <TransactionList />
-            <div className="mt-4 text-center">
-              <Link href="/dashboard/transactions">
-                <Button variant="outline">
-                  View All Transactions
-                  <ArrowUpRight className="ml-2 h-4 w-4" />
-                </Button>
-              </Link>
-            </div>
           </motion.div>
         </div>
         
         <motion.div 
-          className="lg:w-96 space-y-6"
+          className="w-full xl:w-96 space-y-3 lg:space-y-4 min-w-0"
           initial={{ opacity: 0, x: 20 }}
           animate={{ opacity: 1, x: 0 }}
           transition={{ duration: 0.5, delay: 0.4 }}

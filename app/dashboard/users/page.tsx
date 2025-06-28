@@ -121,21 +121,18 @@ export default function UsersPage() {
             <MetricCard 
               title="Total Users" 
               value={metrics.totalUsers.toLocaleString()} 
-              icon={<Users className="h-5 w-5" />}
               change={12.5}
               changeType="increase"
             />
             <MetricCard 
               title="Active Users" 
               value={metrics.activeUsers.toLocaleString()} 
-              icon={<UserCheck className="h-5 w-5" />}
               change={8.2}
               changeType="increase"
             />
             <MetricCard 
               title="Inactive Users" 
               value={metrics.inactiveUsers.toLocaleString()} 
-              icon={<UsersRound className="h-5 w-5" />}
               change={15.3}
               changeType="increase"
             />
