@@ -3,13 +3,7 @@
 import { Eye, EyeOff, ChevronDown, ArrowRightLeft, LogOut } from "lucide-react";
 import { useState, useEffect, useCallback } from "react";
 import { Button } from "@/components/ui/button";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { Input } from "@/components/ui/input";
 import {
   Dialog,
   DialogContent,
@@ -44,7 +38,6 @@ interface ApiResponse {
 
 export default function WalletCard() {
   const [showBalance, setShowBalance] = useState(true);
-  const [selectedAccount, setSelectedAccount] = useState<string>("");
   const [accounts, setAccounts] = useState<BankAccount[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -78,9 +71,6 @@ export default function WalletCard() {
         // Flatten the nested array and keep all accounts
         const flattenedAccounts = response.data.banks.flat();
         setAccounts(flattenedAccounts);
-        if (flattenedAccounts.length > 0 && !selectedAccount) {
-          setSelectedAccount(flattenedAccounts[0].account_id);
-        }
         setError(null);
       } else {
         throw new Error(response.message || 'Failed to fetch balances');
@@ -91,15 +81,11 @@ export default function WalletCard() {
     } finally {
       setLoading(false);
     }
-  }, [selectedAccount]);
+  }, []);
 
   useEffect(() => {
     fetchBalances();
   }, [fetchBalances]);
-
-  const currentAccount = accounts.find(
-    (account) => account.account_id === selectedAccount
-  );
 
   if (loading) {
     return (
@@ -110,10 +96,10 @@ export default function WalletCard() {
             <Skeleton className="h-7 w-7 rounded-full bg-black/10" />
           </div>
           <div className="space-y-4">
-            <Skeleton className="h-9 w-full bg-black/10" />
-            <div>
-              <Skeleton className="h-3 w-20 mb-1.5 bg-black/10" />
-              <Skeleton className="h-8 w-28 bg-black/10" />
+            <div className="space-y-3">
+              <Skeleton className="h-12 w-full bg-black/10" />
+              <Skeleton className="h-12 w-full bg-black/10" />
+              <Skeleton className="h-12 w-full bg-black/10" />
             </div>
             <Skeleton className="h-9 w-full bg-black/10" />
           </div>
@@ -155,34 +141,22 @@ export default function WalletCard() {
         </div>
 
         <div className="space-y-4">
-          <Select
-            value={selectedAccount}
-            onValueChange={setSelectedAccount}
-          >
-            <SelectTrigger className="bg-black/10 text-black border-0">
-              <SelectValue placeholder="Select account" />
-            </SelectTrigger>
-            <SelectContent className="bg-[#6FA83D] text-black border-black/20">
-              {accounts.map((account) => (
-                <SelectItem
-                  key={account.account_id}
-                  value={account.account_id}
-                  className="hover:bg-black/10"
-                >
-                  {account.provider} - {account.account_id}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-
-          <div>
-            <p className="text-black/80 mb-1.5 text-sm">Available Balance</p>
-            <h3 className="text-2xl font-bold">
-              {showBalance ? `₦${(currentAccount?.balance || 0).toLocaleString()}` : "••••••"}
-            </h3>
+          <div className="space-y-3">
+            {accounts.map((account) => (
+              <div key={account.account_id} className="space-y-1">
+                <Label className="text-black/80 text-sm font-medium">
+                  {account.provider}
+                </Label>
+                <Input
+                  value={showBalance ? `₦${account.balance.toLocaleString()}` : "••••••"}
+                  readOnly
+                  className="bg-black/10 text-black border-0 font-semibold cursor-default focus:ring-0 focus:outline-none"
+                />
+              </div>
+            ))}
           </div>
 
-          <div className="flex gap-2">
+          <div className="flex gap-2 pt-2">
             <Button 
               className="flex-1 bg-white/10 text-white hover:bg-gray-100/50 text-sm py-2 border border-white/20"
               onClick={() => setShowEvacuateFundsModal(true)}
