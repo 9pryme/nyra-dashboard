@@ -29,6 +29,7 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { useUsers } from "@/hooks/use-users";
 
 // Define the notification interface
 interface Notification {
@@ -181,68 +182,34 @@ export default function PushNotifications() {
     }
   }, [getApiConfig]);
 
-  // Fetch all users when component mounts or when recipient type changes
+  // Use React Query to fetch users (always fetched for caching, but only used when specific is selected)
+  const { data: allUsersData = [], isLoading: isLoadingUsersQuery, error: usersError } = useUsers();
+
+  // Update local state when users data changes
   useEffect(() => {
     if (recipientType !== "specific") return;
     
-    const fetchAllUsers = async () => {
-      setIsLoadingUsers(true);
+    setIsLoadingUsers(isLoadingUsersQuery);
+    
+    if (allUsersData.length > 0) {
+      // Sort users alphabetically by name
+      const sortedUsers = [...allUsersData].sort((a, b) => 
+        `${a.firstname} ${a.lastname}`.localeCompare(`${b.firstname} ${b.lastname}`)
+      );
+      
+      setAllUsers(sortedUsers);
+      setFilteredUsers(sortedUsers);
+      setDisplayedUsers(sortedUsers.slice(0, itemsPerPage));
       setError(null);
       
-      try {
-        const { token, apiUrl } = getApiConfig();
-
-        console.log(`Fetching users from ${apiUrl}/user-admin/list`);
-        
-        const response = await axios.get(`${apiUrl}/user-admin/list`, {
-          params: { page_size: 100000 },
-          headers: { 
-            Authorization: `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          }
-        });
-
-        console.log('User API response:', response.data);
-
-        if (response.data && response.data.success && Array.isArray(response.data.data)) {
-          // Sort users alphabetically by name
-          const sortedUsers = [...response.data.data].sort((a, b) => 
-            `${a.firstname} ${a.lastname}`.localeCompare(`${b.firstname} ${b.lastname}`)
-          );
-          
-          setAllUsers(sortedUsers);
-          setFilteredUsers(sortedUsers);
-          setDisplayedUsers(sortedUsers.slice(0, itemsPerPage));
-          
-          console.log(`Loaded ${sortedUsers.length} users`);
-        } else {
-          console.error("Failed to fetch users:", response.data?.error || "Unknown error");
-          setError("Failed to fetch users list");
-          setAllUsers([]);
-          setFilteredUsers([]);
-          setDisplayedUsers([]);
-        }
-      } catch (error: any) {
-        console.error("Error fetching users:", error);
-        
-        if (error.response) {
-          setError(`Server error: ${error.response.status}. Please try again.`);
-        } else if (error.request) {
-          setError("Network error. Please check your connection.");
-        } else {
-          setError(`${error.message || "An error occurred while loading users."}`);
-        }
-        
-        setAllUsers([]);
-        setFilteredUsers([]);
-        setDisplayedUsers([]);
-      } finally {
-        setIsLoadingUsers(false);
-      }
-    };
-
-    fetchAllUsers();
-  }, [recipientType, getApiConfig]);
+      console.log(`Loaded ${sortedUsers.length} users`);
+    } else if (usersError) {
+      setError("Failed to load users. Please try again.");
+      setAllUsers([]);
+      setFilteredUsers([]);
+      setDisplayedUsers([]);
+    }
+  }, [allUsersData, recipientType, usersError, isLoadingUsersQuery]);
 
   // Fetch notification history when component mounts
   useEffect(() => {

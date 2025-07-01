@@ -2,10 +2,8 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { FileText, Shield, Wallet, History, Lock, Unlock } from "lucide-react";
 import { useState } from "react";
-import { apiCache } from "@/lib/cache";
-import axios from "axios";
-import { useToast } from "@/hooks/use-toast";
 import UserKycModal from "./UserKycModal";
+import { useFreezeWallet } from "@/hooks/use-users";
 
 interface UserActionsProps {
   userId: string;
@@ -15,65 +13,23 @@ interface UserActionsProps {
 }
 
 export default function UserActions({ userId, frozen, onFrozenUpdate, userName }: UserActionsProps) {
-  const [isLoading, setIsLoading] = useState(false);
   const [isKycModalOpen, setIsKycModalOpen] = useState(false);
-  const { toast } = useToast();
+  const freezeWallet = useFreezeWallet();
 
   // If currently frozen, we want to unfreeze (freeze=false)
   // If currently not frozen, we want to freeze (freeze=true)
   const shouldFreeze = !frozen;
 
-  const handleFreezeUnfreeze = async () => {
-    setIsLoading(true);
-    
-    try {
-      const token = localStorage.getItem('token');
-      if (!token) {
-        throw new Error('No authentication token found');
+  const handleFreezeUnfreeze = () => {
+    freezeWallet.mutate(
+      { userId, freeze: shouldFreeze },
+      {
+        onSuccess: () => {
+          // Update the frozen status based on the action taken
+          onFrozenUpdate?.(shouldFreeze);
+        }
       }
-
-      const response = await apiCache.getOrFetch<any>(
-        `freeze_wallet_${userId}_${shouldFreeze}_${Date.now()}`, // Add timestamp to avoid stale cache
-        async () => {
-          const axiosResponse = await axios.post(
-            `${process.env.NEXT_PUBLIC_API_URL}/admin/wallet/freeze?user_id=${userId}&freeze=${shouldFreeze}`,
-            {},
-            {
-              headers: {
-                Authorization: `Bearer ${token}`
-              }
-            }
-          );
-          return axiosResponse.data;
-        },
-        60000, // 1 minute cache for this action
-        true // Force refresh to ensure latest action
-      );
-
-      if (response.success) {
-        // Update the frozen status based on the action taken
-        onFrozenUpdate?.(shouldFreeze);
-        
-        // Invalidate related cache entries
-        apiCache.invalidate(`user_data_${userId}`);
-        
-        toast({
-          title: "Success",
-          description: `Wallet ${shouldFreeze ? 'frozen' : 'unfrozen'} successfully`,
-        });
-      } else {
-        throw new Error(response.message || `Failed to ${shouldFreeze ? 'freeze' : 'unfreeze'} wallet`);
-      }
-    } catch (err: any) {
-      console.error('Freeze/Unfreeze error:', err);
-      toast({
-        title: "Error",
-        description: err.message || `Failed to ${shouldFreeze ? 'freeze' : 'unfreeze'} wallet`,
-        variant: "destructive",
-      });
-    } finally {
-      setIsLoading(false);
-    }
+    );
   };
 
   return (
@@ -101,20 +57,20 @@ export default function UserActions({ userId, frozen, onFrozenUpdate, userName }
                   : 'bg-red-50 hover:bg-red-100 dark:bg-red-950 dark:hover:bg-red-900 dark:border-red-800'
               }`}
               onClick={handleFreezeUnfreeze}
-              disabled={isLoading}
+              disabled={freezeWallet.isPending}
             >
               {frozen ? (
                 <>
                   <Unlock className="mr-2 h-4 w-4 text-green-600 dark:text-green-400" />
                   <span className="text-green-700 dark:text-green-300">
-                    {isLoading ? 'Unfreezing...' : 'Unfreeze Wallet'}
+                    {freezeWallet.isPending ? 'Unfreezing...' : 'Unfreeze Wallet'}
                   </span>
                 </>
               ) : (
                 <>
                   <Lock className="mr-2 h-4 w-4 text-red-600 dark:text-red-400" />
                   <span className="text-red-700 dark:text-red-300">
-                    {isLoading ? 'Freezing...' : 'Freeze Wallet'}
+                    {freezeWallet.isPending ? 'Freezing...' : 'Freeze Wallet'}
                   </span>
                 </>
               )}

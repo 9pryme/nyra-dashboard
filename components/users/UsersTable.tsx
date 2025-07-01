@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import {
@@ -40,127 +40,49 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import axios from "axios";
 import { format } from "date-fns";
 import { Skeleton } from "@/components/ui/skeleton";
-import { apiCache } from "@/lib/cache";
-
-interface User {
-  created_at: string;
-  updated_at: string;
-  user_id: string;
-  email: string;
-  phone_number: string;
-  firstname: string;
-  lastname: string;
-  role: string;
-  active_status: string;
-}
-
-interface ApiResponse {
-  statusCode: number;
-  status: string;
-  success: boolean;
-  error: string;
-  message: string;
-  data: User[];
-}
+import { useUsers, useUpdateUserStatus } from "@/hooks/use-users";
+import { User } from "@/lib/services/user";
 
 const ITEMS_PER_PAGE = 10;
 
 interface UsersTableProps {
-  loading?: boolean;
+  // No longer need loading prop since React Query handles it
 }
 
-export default function UsersTable({ loading }: UsersTableProps) {
+export default function UsersTable({}: UsersTableProps) {
   const router = useRouter();
   const [searchTerm, setSearchTerm] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
   const [statusFilter, setStatusFilter] = useState<string>("all");
-  const [users, setUsers] = useState<User[]>([]);
-  const [error, setError] = useState<string | null>(null);
   const [showRestrictDialog, setShowRestrictDialog] = useState(false);
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
   const [copiedItems, setCopiedItems] = useState<Set<string>>(new Set());
 
-  useEffect(() => {
-    const fetchUsers = async () => {
-      try {
-        const token = localStorage.getItem('token');
-        if (!token) {
-          throw new Error('No authentication token found');
-        }
-
-        const response = await axios.get<ApiResponse>(`${process.env.NEXT_PUBLIC_API_URL}/user-admin/list?page_size=100000`, {
-          headers: {
-            Authorization: `Bearer ${token}`
-          }
-        });
-
-        if (response.data.success && Array.isArray(response.data.data)) {
-          setUsers(response.data.data);
-        } else {
-          throw new Error(response.data.message || 'Failed to fetch users');
-        }
-      } catch (err) {
-        if (axios.isAxiosError(err)) {
-          setError(err.response?.data?.message || 'Failed to fetch users');
-        } else {
-          setError(err instanceof Error ? err.message : 'Failed to fetch users');
-        }
-      }
-    };
-
-    fetchUsers();
-  }, []);
+  // Use React Query hooks
+  const { data: users = [], isLoading, error } = useUsers();
+  const updateUserStatus = useUpdateUserStatus();
 
   const handleRestrictUser = (user: User) => {
     setSelectedUser(user);
     setShowRestrictDialog(true);
   };
 
-  const onConfirmRestrict = async () => {
+  const onConfirmRestrict = () => {
     if (!selectedUser) return;
 
-    try {
-      const token = localStorage.getItem('token');
-      if (!token) {
-        throw new Error('No authentication token found');
-      }
+    const newStatus = selectedUser.active_status === "ACTIVE" ? "INACTIVE" : "ACTIVE";
 
-      const newStatus = selectedUser.active_status === "ACTIVE" ? "INACTIVE" : "ACTIVE";
-
-      const response = await axios.post(
-        `${process.env.NEXT_PUBLIC_API_URL}/user-admin/set-active-status`,
-        {
-          user_id: selectedUser.user_id,
-          active_status: newStatus
-        },
-        {
-          headers: {
-            Authorization: `Bearer ${token}`
-          }
+    updateUserStatus.mutate(
+      { userId: selectedUser.user_id, activeStatus: newStatus },
+      {
+        onSettled: () => {
+          setShowRestrictDialog(false);
+          setSelectedUser(null);
         }
-      );
-
-      if (response.data.success) {
-        // Update the user in the local state
-        setUsers(users.map(user => 
-          user.user_id === selectedUser.user_id 
-            ? { ...user, active_status: newStatus }
-            : user
-        ));
       }
-    } catch (err) {
-      if (axios.isAxiosError(err)) {
-        setError(err.response?.data?.message || 'Failed to update user status');
-      } else {
-        setError(err instanceof Error ? err.message : 'Failed to update user status');
-      }
-    } finally {
-      setShowRestrictDialog(false);
-      setSelectedUser(null);
-    }
+    );
   };
 
   const filteredUsers = useMemo(() => {
@@ -218,7 +140,7 @@ export default function UsersTable({ loading }: UsersTableProps) {
     }, 2000);
   };
 
-  if (loading) {
+  if (isLoading) {
     return (
       <div className="bg-card rounded-lg shadow-sm overflow-hidden border border-border/40">
         <div className="p-6">
@@ -258,7 +180,7 @@ export default function UsersTable({ loading }: UsersTableProps) {
     return (
       <div className="bg-card rounded-lg shadow-sm overflow-hidden border border-border/40 p-6">
         <div className="flex items-center justify-center h-32">
-          <p className="text-destructive">{error}</p>
+          <p className="text-destructive">{error.message || 'Failed to load users'}</p>
         </div>
       </div>
     );

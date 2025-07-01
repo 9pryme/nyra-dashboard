@@ -1,4 +1,4 @@
-import { apiCache } from "@/lib/cache";
+// React Query now handles caching - no need for apiCache
 
 export interface PeriodAnalytics {
   categories: Record<string, number>;
@@ -40,6 +40,7 @@ class AnalyticsService {
 
   /**
    * Fetch recent transaction analytics
+   * Note: Caching is now handled by React Query
    */
   async fetchRecentAnalytics(): Promise<TransactionAnalytics> {
     const token = localStorage.getItem('token');
@@ -47,39 +48,37 @@ class AnalyticsService {
       throw new Error('No authentication token found');
     }
 
-    const response = await apiCache.getOrFetch<AnalyticsApiResponse>(
-      'recent_transaction_analytics',
-      async () => {
-        const response = await fetch(`${this.baseURL}/analytics/transactions/recent`, {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          }
-        });
+    const response = await fetch(`${this.baseURL}/analytics/transactions/recent`, {
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json'
+      }
+    });
 
-        if (!response.ok) {
-          if (response.status === 404) {
-            throw new Error('Analytics endpoint not found - feature may not be available yet');
-          }
-          throw new Error(`HTTP error! status: ${response.status}`);
-        }
-
-        const data = await response.json();
-        
-        if (!data) {
-          throw new Error('No data received from analytics endpoint');
-        }
-
-        return data;
-      },
-      2 * 60 * 1000 // Cache for 2 minutes
-    );
-
-    if (!response || !response.success) {
-      throw new Error(response?.message || 'Failed to fetch analytics data');
+    if (!response.ok) {
+      if (response.status === 404) {
+        throw new Error('Analytics endpoint not found - feature may not be available yet');
+      }
+      if (response.status === 401) {
+        throw new Error('Authentication failed - please log in again');
+      }
+      if (response.status >= 500) {
+        throw new Error('Server error - please try again later');
+      }
+      throw new Error(`HTTP error! status: ${response.status}`);
     }
 
-    return response.data;
+    const data: AnalyticsApiResponse = await response.json();
+    
+    if (!data) {
+      throw new Error('No data received from analytics endpoint');
+    }
+
+    if (!data.success) {
+      throw new Error(data.message || 'Failed to fetch analytics data');
+    }
+
+    return data.data;
   }
 
   /**
@@ -95,23 +94,36 @@ class AnalyticsService {
   /**
    * Calculate daily change (today vs yesterday)
    */
-  calculateDailyChanges(analytics: TransactionAnalytics) {
+  calculateDailyChanges(analytics: TransactionAnalytics | null) {
+    // Handle null analytics or missing period data
+    if (!analytics || !analytics.today || !analytics.yesteday) {
+      return {
+        volumeChange: 0,
+        creditChange: 0,
+        debitChange: 0,
+        transactionCountChange: 0
+      };
+    }
+
+    const today = analytics.today;
+    const yesterday = analytics.yesteday;
+
     return {
       volumeChange: this.calculatePercentageChange(
-        analytics.today.total_credit + analytics.today.total_debit,
-        analytics.yesteday.total_credit + analytics.yesteday.total_debit
+        (today.total_credit || 0) + (today.total_debit || 0),
+        (yesterday.total_credit || 0) + (yesterday.total_debit || 0)
       ),
       creditChange: this.calculatePercentageChange(
-        analytics.today.total_credit,
-        analytics.yesteday.total_credit
+        today.total_credit || 0,
+        yesterday.total_credit || 0
       ),
       debitChange: this.calculatePercentageChange(
-        analytics.today.total_debit,
-        analytics.yesteday.total_debit
+        today.total_debit || 0,
+        yesterday.total_debit || 0
       ),
       transactionCountChange: this.calculatePercentageChange(
-        analytics.today.electronic,
-        analytics.yesteday.electronic
+        today.electronic || 0,
+        yesterday.electronic || 0
       )
     };
   }
@@ -119,7 +131,17 @@ class AnalyticsService {
   /**
    * Calculate monthly change (current month vs last month)
    */
-  calculateMonthlyChanges(analytics: TransactionAnalytics) {
+  calculateMonthlyChanges(analytics: TransactionAnalytics | null) {
+    // Handle null analytics or missing period data
+    if (!analytics || !analytics.current_month) {
+      return {
+        volumeChange: 0,
+        creditChange: 0,
+        debitChange: 0,
+        transactionCountChange: 0
+      };
+    }
+
     const lastMonth = analytics.last_month;
     if (!lastMonth) {
       return {
@@ -130,22 +152,24 @@ class AnalyticsService {
       };
     }
 
+    const currentMonth = analytics.current_month;
+
     return {
       volumeChange: this.calculatePercentageChange(
-        analytics.current_month.total_credit + analytics.current_month.total_debit,
-        lastMonth.total_credit + lastMonth.total_debit
+        (currentMonth.total_credit || 0) + (currentMonth.total_debit || 0),
+        (lastMonth.total_credit || 0) + (lastMonth.total_debit || 0)
       ),
       creditChange: this.calculatePercentageChange(
-        analytics.current_month.total_credit,
-        lastMonth.total_credit
+        currentMonth.total_credit || 0,
+        lastMonth.total_credit || 0
       ),
       debitChange: this.calculatePercentageChange(
-        analytics.current_month.total_debit,
-        lastMonth.total_debit
+        currentMonth.total_debit || 0,
+        lastMonth.total_debit || 0
       ),
       transactionCountChange: this.calculatePercentageChange(
-        analytics.current_month.electronic,
-        lastMonth.electronic
+        currentMonth.electronic || 0,
+        lastMonth.electronic || 0
       )
     };
   }
@@ -153,7 +177,11 @@ class AnalyticsService {
   /**
    * Get the top categories for a period
    */
-  getTopCategories(periodData: PeriodAnalytics, limit: number = 5): Array<{category: string, amount: number}> {
+  getTopCategories(periodData: PeriodAnalytics | null, limit: number = 5): Array<{category: string, amount: number}> {
+    if (!periodData || !periodData.categories) {
+      return [];
+    }
+    
     return Object.entries(periodData.categories)
       .map(([category, amount]) => ({ category, amount }))
       .sort((a, b) => b.amount - a.amount)
@@ -200,13 +228,24 @@ class AnalyticsService {
    * Get available time period options
    */
   getTimePeriodOptions(analytics: TransactionAnalytics | null): TimePeriodOption[] {
+    if (!analytics) {
+      return [
+        { value: 'today', label: 'Today', available: false },
+        { value: 'yesteday', label: 'Yesterday', available: false },
+        { value: 'current_month', label: 'This Month', available: false },
+        { value: 'last_month', label: 'Last Month', available: false },
+        { value: 'current_year', label: 'This Year', available: false },
+        { value: 'last_year', label: 'Last Year', available: false }
+      ];
+    }
+
     return [
-      { value: 'today', label: 'Today', available: !!analytics?.today },
-      { value: 'yesteday', label: 'Yesterday', available: !!analytics?.yesteday },
-      { value: 'current_month', label: 'This Month', available: !!analytics?.current_month },
-      { value: 'last_month', label: 'Last Month', available: !!analytics?.last_month },
-      { value: 'current_year', label: 'This Year', available: !!analytics?.current_year },
-      { value: 'last_year', label: 'Last Year', available: !!analytics?.last_year }
+      { value: 'today', label: 'Today', available: !!analytics.today },
+      { value: 'yesteday', label: 'Yesterday', available: !!analytics.yesteday },
+      { value: 'current_month', label: 'This Month', available: !!analytics.current_month },
+      { value: 'last_month', label: 'Last Month', available: !!analytics.last_month },
+      { value: 'current_year', label: 'This Year', available: !!analytics.current_year },
+      { value: 'last_year', label: 'Last Year', available: !!analytics.last_year }
     ];
   }
 
@@ -238,17 +277,17 @@ class AnalyticsService {
    * Process category data for display
    */
   processCategoryData(periodData: PeriodAnalytics | null) {
-    if (!periodData?.categories) return [];
+    if (!periodData || !periodData.categories) return [];
     
     const categories = periodData.categories;
-    const totalAmount = Object.values(categories).reduce((sum, amount) => sum + amount, 0);
+    const totalAmount = Object.values(categories).reduce((sum, amount) => sum + (amount || 0), 0);
     
     return Object.entries(categories)
       .map(([category, amount]) => ({
         category: category.replace(/_/g, ' '),
-        amount,
-        percentage: totalAmount > 0 ? ((amount / totalAmount) * 100) : 0,
-        formattedAmount: this.formatVolume(amount)
+        amount: amount || 0,
+        percentage: totalAmount > 0 ? (((amount || 0) / totalAmount) * 100) : 0,
+        formattedAmount: this.formatVolume(amount || 0)
       }))
       .sort((a, b) => b.amount - a.amount);
   }
@@ -271,18 +310,21 @@ class AnalyticsService {
       };
     }
 
-    const totalVolume = periodData.total_credit + periodData.total_debit;
+    const totalCredit = periodData.total_credit || 0;
+    const totalDebit = periodData.total_debit || 0;
+    const totalVolume = totalCredit + totalDebit;
     const totalCharges = (periodData.total_charges_external || 0) + (periodData.total_charges_internal || 0);
+    const totalTransactions = periodData.electronic || 0;
 
     return {
-      totalTransactions: periodData.electronic,
+      totalTransactions,
       totalVolume,
-      totalCredit: periodData.total_credit,
-      totalDebit: periodData.total_debit,
+      totalCredit,
+      totalDebit,
       totalCharges,
       formattedVolume: this.formatVolume(totalVolume),
-      formattedCredit: this.formatVolume(periodData.total_credit),
-      formattedDebit: this.formatVolume(periodData.total_debit),
+      formattedCredit: this.formatVolume(totalCredit),
+      formattedDebit: this.formatVolume(totalDebit),
       formattedCharges: this.formatVolume(totalCharges)
     };
   }

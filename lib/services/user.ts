@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { apiCache } from '@/lib/cache';
+// React Query now handles caching - no need for apiCache
 
 export interface User {
   user_id: string;
@@ -61,45 +61,32 @@ class UserService {
   }
 
   /**
-   * Fetch all users with caching
+   * Fetch all users - caching now handled by React Query
    */
   async getAllUsers(): Promise<User[]> {
     try {
-      let response;
-      try {
-        response = await apiCache?.getOrFetch(
-          'all-users-list',
-          async () => {
-            const res = await axios.get<UserListResponse>(
-              `${this.baseUrl}/user-admin/list?page_size=100000`,
-              {
-                headers: this.getAuthHeaders()
-              }
-            );
-            return res.data;
-          },
-          5 * 60 * 1000 // 5 minutes cache
-        );
-      } catch (cacheError) {
-        console.warn('Cache failed, using direct API call:', cacheError);
-        const res = await axios.get<UserListResponse>(
-          `${this.baseUrl}/user-admin/list?page_size=100000`,
-          {
-            headers: this.getAuthHeaders()
-          }
-        );
-        response = res.data;
-      }
+      const response = await axios.get<UserListResponse>(
+        `${this.baseUrl}/user-admin/list?page_size=100000`,
+        {
+          headers: this.getAuthHeaders()
+        }
+      );
 
-      if (response?.success) {
-        return response.data;
+      if (response.data?.success) {
+        return response.data.data;
       } else {
-        throw new Error(response?.message || 'Failed to fetch users');
+        throw new Error(response.data?.message || 'Failed to fetch users');
       }
     } catch (error) {
       if (axios.isAxiosError(error)) {
         if (error.response?.status === 429) {
           throw new Error('Too many requests. Please wait a moment and try again.');
+        }
+        if (error.response?.status === 401) {
+          throw new Error('Authentication failed - please log in again');
+        }
+        if (error.response && error.response.status >= 500) {
+          throw new Error('Server error - please try again later');
         }
         throw new Error(error.response?.data?.message || 'Failed to fetch users');
       }
@@ -128,42 +115,31 @@ class UserService {
   }
 
   /**
-   * Get user balance
+   * Get user balance - caching now handled by React Query
    */
   async getUserBalance(userId: string): Promise<UserBalance | null> {
     try {
-      let response;
-      try {
-        response = await apiCache?.getOrFetch(
-          `user-balance-${userId}`,
-          async () => {
-            const res = await axios.get<UserBalanceResponse>(
-              `${this.baseUrl}/admin/wallet/user/${userId}`,
-              {
-                headers: this.getAuthHeaders()
-              }
-            );
-            return res.data;
-          },
-          2 * 60 * 1000 // 2 minutes cache
-        );
-      } catch (cacheError) {
-        console.warn('Cache failed, using direct API call:', cacheError);
-        const res = await axios.get<UserBalanceResponse>(
-          `${this.baseUrl}/admin/wallet/user/${userId}`,
-          {
-            headers: this.getAuthHeaders()
-          }
-        );
-        response = res.data;
-      }
+      const response = await axios.get<UserBalanceResponse>(
+        `${this.baseUrl}/admin/wallet/user/${userId}`,
+        {
+          headers: this.getAuthHeaders()
+        }
+      );
 
-      if (response?.success) {
-        return response.data;
+      if (response.data?.success) {
+        return response.data.data;
       }
       return null;
     } catch (error) {
       console.error('Failed to fetch user balance:', error);
+      if (axios.isAxiosError(error)) {
+        if (error.response?.status === 401) {
+          throw new Error('Authentication failed - please log in again');
+        }
+        if (error.response && error.response.status >= 500) {
+          throw new Error('Server error - please try again later');
+        }
+      }
       return null;
     }
   }
@@ -188,13 +164,7 @@ class UserService {
         throw new Error(response.data.message || 'Failed to credit wallet');
       }
 
-      // Clear relevant caches
-      try {
-        apiCache?.invalidate('wallet-credit-history');
-        apiCache?.invalidate(`user-balance-${userId}`);
-      } catch (cacheError) {
-        console.warn('Cache invalidation failed:', cacheError);
-      }
+      // Cache invalidation is now handled by React Query mutations
     } catch (error) {
       if (axios.isAxiosError(error)) {
         if (error.response?.status === 429) {
@@ -226,13 +196,7 @@ class UserService {
         throw new Error(response.data.message || 'Failed to debit wallet');
       }
 
-      // Clear relevant caches
-      try {
-        apiCache?.invalidate('wallet-debit-history');
-        apiCache?.invalidate(`user-balance-${userId}`);
-      } catch (cacheError) {
-        console.warn('Cache invalidation failed:', cacheError);
-      }
+      // Cache invalidation is now handled by React Query mutations
     } catch (error) {
       if (axios.isAxiosError(error)) {
         if (error.response?.status === 429) {
@@ -266,14 +230,11 @@ class UserService {
   }
 
   /**
-   * Clear user-related caches
+   * Clear user-related caches - now handled by React Query
    */
   clearUserCaches(): void {
-    try {
-      apiCache?.invalidate('all-users-list');
-    } catch (error) {
-      console.warn('Failed to clear user caches:', error);
-    }
+    // Cache clearing is now handled by React Query hooks
+    console.log('Use useClearUserCaches hook for cache invalidation');
   }
 }
 

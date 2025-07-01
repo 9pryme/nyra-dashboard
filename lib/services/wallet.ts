@@ -73,14 +73,30 @@ export class WalletService {
       throw new Error('No authentication token found');
     }
 
-    const response = await axios.get(`${this.baseUrl}/admin/wallet/users?page_size=${pageSize}`, {
-      headers: { Authorization: `Bearer ${token}` }
-    });
+    try {
+      const response = await axios.get(`${this.baseUrl}/admin/wallet/users?page_size=${pageSize}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
 
-    if (response.data.success) {
-      return response.data.data;
+      if (response.data.success) {
+        return response.data.data;
+      }
+      throw new Error(response.data.message || 'Failed to fetch wallets');
+    } catch (error) {
+      if (axios.isAxiosError(error)) {
+        if (error.response?.status === 401) {
+          throw new Error('Authentication failed - please log in again');
+        }
+        if (error.response?.status === 429) {
+          throw new Error('Too many requests. Please wait a moment and try again.');
+        }
+        if (error.response && error.response.status >= 500) {
+          throw new Error('Server error - please try again later');
+        }
+        throw new Error(error.response?.data?.message || 'Failed to fetch wallets');
+      }
+      throw error;
     }
-    throw new Error(response.data.message || 'Failed to fetch wallets');
   }
 
   async fetchWalletSummary(): Promise<WalletSummary> {
@@ -89,14 +105,30 @@ export class WalletService {
       throw new Error('No authentication token found');
     }
 
-    const response = await axios.get(`${this.baseUrl}/wallet/summary`, {
-      headers: { Authorization: `Bearer ${token}` }
-    });
+    try {
+      const response = await axios.get(`${this.baseUrl}/wallet/summary`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
 
-    if (response.data.success) {
-      return response.data.data[0];
+      if (response.data.success) {
+        return response.data.data[0];
+      }
+      throw new Error(response.data.message || 'Failed to fetch wallet summary');
+    } catch (error) {
+      if (axios.isAxiosError(error)) {
+        if (error.response?.status === 401) {
+          throw new Error('Authentication failed - please log in again');
+        }
+        if (error.response?.status === 429) {
+          throw new Error('Too many requests. Please wait a moment and try again.');
+        }
+        if (error.response && error.response.status >= 500) {
+          throw new Error('Server error - please try again later');
+        }
+        throw new Error(error.response?.data?.message || 'Failed to fetch wallet summary');
+      }
+      throw error;
     }
-    throw new Error(response.data.message || 'Failed to fetch wallet summary');
   }
 
   calculateWalletAnalytics(wallets: WalletData[]): WalletAnalytics {

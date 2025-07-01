@@ -3,6 +3,7 @@ import type { Metadata } from 'next';
 import localFont from 'next/font/local';
 import { AuthProvider } from "@/lib/context/AuthContext";
 import { LoadingProvider } from "@/lib/context/LoadingContext";
+import { QueryProvider } from "@/lib/context/QueryProvider";
 import { Toaster } from "@/components/ui/toaster";
 import { ThemeProvider } from "@/components/ui/theme-provider";
 
@@ -149,12 +150,14 @@ export default function RootLayout({
           enableSystem
           disableTransitionOnChange
         >
-          <LoadingProvider>
-            <AuthProvider>
-              {children}
-              <Toaster />
-            </AuthProvider>
-          </LoadingProvider>
+          <QueryProvider>
+            <LoadingProvider>
+              <AuthProvider>
+                {children}
+                <Toaster />
+              </AuthProvider>
+            </LoadingProvider>
+          </QueryProvider>
         </ThemeProvider>
       </body>
     </html>

@@ -9,7 +9,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { ArrowUpRight, ArrowDownRight, CircleDollarSign, Clock } from "lucide-react";
 import { motion } from "framer-motion";
 import { transactionCache } from "@/lib/cache";
-import { analyticsService, TransactionAnalytics, TimePeriod } from "@/lib/services/analytics";
+import { useAnalyticsMetrics } from "@/hooks/use-analytics";
+import { analyticsService, TimePeriod } from "@/lib/services/analytics";
 
 interface Transaction {
   transaction_id: string;
@@ -30,9 +31,11 @@ interface ApiResponse {
 
 export default function TransactionsPage() {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
-  const [analytics, setAnalytics] = useState<TransactionAnalytics | null>(null);
   const [loading, setLoading] = useState(true);
   const [selectedPeriod, setSelectedPeriod] = useState<TimePeriod>('current_month');
+  
+  // Use React Query for analytics with automatic retry and caching
+  const { analytics, monthlyChanges, timePeriodOptions, isLoading: analyticsLoading } = useAnalyticsMetrics();
 
   useEffect(() => {
     const fetchData = async () => {
@@ -60,27 +63,7 @@ export default function TransactionsPage() {
           setTransactions(transactionResponse.data);
         }
 
-        // Fetch analytics with timeout and fallback
-        try {
-          const analyticsPromise = analyticsService.fetchRecentAnalytics();
-          const timeoutPromise = new Promise((_, reject) => 
-            setTimeout(() => reject(new Error('Analytics timeout')), 5000)
-          );
-          
-          const analyticsData = await Promise.race([analyticsPromise, timeoutPromise]) as TransactionAnalytics;
-          setAnalytics(analyticsData);
-        } catch (analyticsError) {
-          console.warn('Analytics fetch failed, using fallback:', analyticsError);
-          // Set fallback analytics data
-          setAnalytics({
-            today: { categories: {}, electronic: 0, total_debit: 0, total_credit: 0 },
-            yesteday: { categories: {}, electronic: 0, total_debit: 0, total_credit: 0 },
-            current_month: { categories: {}, electronic: 0, total_debit: 0, total_credit: 0 },
-            last_month: null,
-            current_year: { categories: {}, electronic: 0, total_debit: 0, total_credit: 0 },
-            last_year: null
-          });
-        }
+        // Analytics are now handled by React Query hook - no manual fetching needed
       } catch (err: any) {
         console.error('TransactionsPage fetch error:', err);
       } finally {
@@ -91,19 +74,8 @@ export default function TransactionsPage() {
     fetchData();
   }, []);
 
-  // Calculate changes using analytics service with fallback
-  const monthlyChanges = analytics ? analyticsService.calculateMonthlyChanges(analytics) : {
-    volumeChange: 0,
-    creditChange: 0,
-    debitChange: 0,
-    transactionCountChange: 0
-  };
-
-  // Get time period options
-  const timePeriodOptions = analyticsService.getTimePeriodOptions(analytics);
-  
   // Get current period data
-  const currentPeriodData = analyticsService.getPeriodData(analytics, selectedPeriod);
+  const currentPeriodData = analyticsService.getPeriodData(analytics || null, selectedPeriod);
   const periodSummary = analyticsService.getPeriodSummary(currentPeriodData);
   
   // Process category data for the selected period
@@ -131,26 +103,26 @@ export default function TransactionsPage() {
       >
         <MetricCard 
           title="Monthly Transactions" 
-          value={loading ? "..." : analytics ? analyticsService.formatCount(analytics.current_month.electronic) : '0'} 
-          change={loading ? 0 : Math.abs(monthlyChanges.transactionCountChange)}
+          value={analyticsLoading ? "..." : analytics?.current_month ? analyticsService.formatCount(analytics.current_month.electronic || 0) : '0'} 
+          change={analyticsLoading ? 0 : Math.abs(monthlyChanges.transactionCountChange)}
           changeType={monthlyChanges.transactionCountChange >= 0 ? "increase" : "decrease"}
         />
         <MetricCard 
           title="Monthly Volume" 
-          value={loading ? "..." : analytics ? analyticsService.formatVolume(analytics.current_month.total_credit + analytics.current_month.total_debit) : '₦0'} 
-          change={loading ? 0 : Math.abs(monthlyChanges.volumeChange)}
+          value={analyticsLoading ? "..." : analytics?.current_month ? analyticsService.formatVolume((analytics.current_month.total_credit || 0) + (analytics.current_month.total_debit || 0)) : '₦0'} 
+          change={analyticsLoading ? 0 : Math.abs(monthlyChanges.volumeChange)}
           changeType={monthlyChanges.volumeChange >= 0 ? "increase" : "decrease"}
         />
         <MetricCard 
           title="Monthly Credit" 
-          value={loading ? "..." : analytics ? analyticsService.formatVolume(analytics.current_month.total_credit) : '₦0'} 
-          change={loading ? 0 : Math.abs(monthlyChanges.creditChange)}
+          value={analyticsLoading ? "..." : analytics?.current_month ? analyticsService.formatVolume(analytics.current_month.total_credit || 0) : '₦0'} 
+          change={analyticsLoading ? 0 : Math.abs(monthlyChanges.creditChange)}
           changeType={monthlyChanges.creditChange >= 0 ? "increase" : "decrease"}
         />
         <MetricCard 
           title="Monthly Debit" 
-          value={loading ? "..." : analytics ? analyticsService.formatVolume(analytics.current_month.total_debit) : '₦0'} 
-          change={loading ? 0 : Math.abs(monthlyChanges.debitChange)}
+          value={analyticsLoading ? "..." : analytics?.current_month ? analyticsService.formatVolume(analytics.current_month.total_debit || 0) : '₦0'} 
+          change={analyticsLoading ? 0 : Math.abs(monthlyChanges.debitChange)}
           changeType={monthlyChanges.debitChange >= 0 ? "increase" : "decrease"}
         />
       </motion.div>

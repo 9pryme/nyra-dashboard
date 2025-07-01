@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { apiCache } from '@/lib/cache';
+// React Query now handles caching - no need for apiCache
 
 export interface EvacuationRecord {
   created_at: string;
@@ -44,31 +44,22 @@ class EvacuationService {
       throw new Error('No authentication token found');
     }
 
-    const cacheKey = `evacuation_history_${provider}_${fromDate}_${toDate}`;
-    
-    const response = await apiCache.getOrFetch<EvacuationResponse>(
-      cacheKey,
-      async () => {
-        const axiosResponse = await axios.get(
-          `${this.baseUrl}/funds/history`,
-          {
-            params: {
-              transferred_from: provider,
-              from: fromDate,
-              to: toDate
-            },
-            headers: { Authorization: `Bearer ${token}` }
-          }
-        );
-        return axiosResponse.data;
-      },
-      300000 // 5 minutes cache
+    const response = await axios.get<EvacuationResponse>(
+      `${this.baseUrl}/funds/history`,
+      {
+        params: {
+          transferred_from: provider,
+          from: fromDate,
+          to: toDate
+        },
+        headers: { Authorization: `Bearer ${token}` }
+      }
     );
 
-    if (response.success && response.data) {
-      return response.data;
+    if (response.data.success && response.data.data) {
+      return response.data.data;
     } else {
-      throw new Error(response.message || 'Failed to fetch evacuation history');
+      throw new Error(response.data.message || 'Failed to fetch evacuation history');
     }
   }
 

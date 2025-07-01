@@ -16,8 +16,9 @@ import { dashboardCache } from "@/lib/cache";
 import NyraLoading from "@/components/ui/nyra-loading";
 import { apiCache } from "@/lib/cache";
 import { useGlobalLoading } from "@/hooks/use-global-loading";
+import { useAnalyticsMetrics } from "@/hooks/use-analytics";
 import { walletService, WalletAnalytics } from "@/lib/services/wallet";
-import { analyticsService, TransactionAnalytics } from "@/lib/services/analytics";
+import { analyticsService } from "@/lib/services/analytics";
 
 interface WalletSummary {
   total_balance: string;
@@ -29,11 +30,13 @@ interface WalletSummary {
 
 export default function DashboardPage() {
   const [walletSummary, setWalletSummary] = useState<WalletSummary | null>(null);
-  const [transactionAnalytics, setTransactionAnalytics] = useState<TransactionAnalytics | null>(null);
   const [walletAnalytics, setWalletAnalytics] = useState<WalletAnalytics | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const { isLoading: globalLoading } = useGlobalLoading();
+  
+  // Use React Query for analytics with automatic retry and caching
+  const { analytics: transactionAnalytics, dailyChanges, isLoading: analyticsLoading } = useAnalyticsMetrics();
 
   useEffect(() => {
     const fetchData = async () => {
@@ -74,27 +77,7 @@ export default function DashboardPage() {
           setWalletAnalytics(walletStats);
         }
 
-        // Fetch analytics separately with timeout and fallback
-        try {
-          const analyticsPromise = analyticsService.fetchRecentAnalytics();
-          const timeoutPromise = new Promise((_, reject) => 
-            setTimeout(() => reject(new Error('Analytics timeout')), 5000)
-          );
-          
-          const analytics = await Promise.race([analyticsPromise, timeoutPromise]) as TransactionAnalytics;
-          setTransactionAnalytics(analytics);
-        } catch (analyticsError) {
-          console.warn('Analytics fetch failed, using fallback:', analyticsError);
-          // Set fallback analytics data to prevent UI from breaking
-          setTransactionAnalytics({
-            today: { categories: {}, electronic: 0, total_debit: 0, total_credit: 0 },
-            yesteday: { categories: {}, electronic: 0, total_debit: 0, total_credit: 0 },
-            current_month: { categories: {}, electronic: 0, total_debit: 0, total_credit: 0 },
-            last_month: null,
-            current_year: { categories: {}, electronic: 0, total_debit: 0, total_credit: 0 },
-            last_year: null
-          });
-        }
+        // Analytics are now handled by React Query hook - no manual fetching needed
 
         setError(null);
       } catch (err: any) {
@@ -109,7 +92,7 @@ export default function DashboardPage() {
   }, []);
 
   // Don't show local loading if global loading is active
-  if (loading && !globalLoading) {
+  if ((loading || analyticsLoading) && !globalLoading) {
     return <NyraLoading size="lg" className="min-h-[60vh]" />;
   }
 
@@ -121,13 +104,7 @@ export default function DashboardPage() {
     );
   }
 
-  // Calculate changes using analytics service with fallback
-  const dailyChanges = transactionAnalytics ? analyticsService.calculateDailyChanges(transactionAnalytics) : {
-    volumeChange: 0,
-    creditChange: 0, 
-    debitChange: 0,
-    transactionCountChange: 0
-  };
+  // dailyChanges is now provided by the useAnalyticsMetrics hook
 
   return (
     <div className="space-y-3 lg:space-y-4 max-w-full">
@@ -156,7 +133,7 @@ export default function DashboardPage() {
             />
             <MetricCard 
               title="Today's Volume" 
-              value={transactionAnalytics ? analyticsService.formatVolume(transactionAnalytics.today.total_credit + transactionAnalytics.today.total_debit) : '₦0.00'} 
+              value={transactionAnalytics?.today ? analyticsService.formatVolume((transactionAnalytics.today.total_credit || 0) + (transactionAnalytics.today.total_debit || 0)) : '₦0.00'} 
               change={Math.abs(dailyChanges.volumeChange)}
               changeType={dailyChanges.volumeChange >= 0 ? "increase" : "decrease"}
             />
@@ -168,7 +145,7 @@ export default function DashboardPage() {
             />
             <MetricCard 
               title="Today's Transactions" 
-              value={transactionAnalytics ? analyticsService.formatCount(transactionAnalytics.today.electronic) : '0'} 
+              value={transactionAnalytics?.today ? analyticsService.formatCount(transactionAnalytics.today.electronic || 0) : '0'} 
               change={Math.abs(dailyChanges.transactionCountChange)}
               changeType={dailyChanges.transactionCountChange >= 0 ? "increase" : "decrease"}
             />

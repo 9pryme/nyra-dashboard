@@ -1587,6 +1587,24 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@tanstack/query-core@npm:5.81.5":
+  version: 5.81.5
+  resolution: "@tanstack/query-core@npm:5.81.5"
+  checksum: 0072364aa08627663ec92ecbe5bfd89b989bb9e613801f7751c09905fe4bdbf1e88220db37a490fe06cbf19e061b8c440c85ff0366c83753ee4070ec9cf565b9
+  languageName: node
+  linkType: hard
+
+"@tanstack/react-query@npm:^5.81.5":
+  version: 5.81.5
+  resolution: "@tanstack/react-query@npm:5.81.5"
+  dependencies:
+    "@tanstack/query-core": 5.81.5
+  peerDependencies:
+    react: ^18 || ^19
+  checksum: 0847149af07068b4cfed3df70c1028bcba54a6e22e4e26da31dc8e4b0c5237bae7004f6ea01f13fe867a08bd6195a158128c76d7e2b6b690453fbce6c6742bb3
+  languageName: node
+  linkType: hard
+
 "@tybys/wasm-util@npm:^0.9.0":
   version: 0.9.0
   resolution: "@tybys/wasm-util@npm:0.9.0"
@@ -4750,6 +4768,7 @@ __metadata:
     "@radix-ui/react-toggle": ^1.1.0
     "@radix-ui/react-toggle-group": ^1.1.0
     "@radix-ui/react-tooltip": ^1.1.2
+    "@tanstack/react-query": ^5.81.5
     "@types/js-cookie": ^3.0.6
     "@types/node": 20.6.2
     "@types/react": 18.2.22

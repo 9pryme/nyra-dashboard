@@ -1,75 +1,15 @@
 "use client";
 
-import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
 import MetricCard from "@/components/dashboard/MetricCard";
 import { Users, UserCheck, UsersRound } from "lucide-react";
 import UsersTable from "@/components/users/UsersTable";
-import axios from "axios";
 import { Skeleton } from "@/components/ui/skeleton";
-
-interface User {
-  created_at: string;
-  updated_at: string;
-  user_id: string;
-  email: string;
-  phone_number: string;
-  firstname: string;
-  lastname: string;
-  role: string;
-  active_status: string;
-}
-
-interface ApiResponse {
-  statusCode: number;
-  status: string;
-  success: boolean;
-  error: string;
-  message: string;
-  data: User[];
-}
+import { useUserMetrics } from "@/hooks/use-users";
 
 export default function UsersPage() {
-  const [metrics, setMetrics] = useState({
-    totalUsers: 0,
-    activeUsers: 0,
-    inactiveUsers: 0
-  });
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    const fetchUsers = async () => {
-      try {
-        const token = localStorage.getItem('token');
-        if (!token) {
-          throw new Error('No authentication token found');
-        }
-
-        const response = await axios.get<ApiResponse>(`${process.env.NEXT_PUBLIC_API_URL}/user-admin/list?page_size=100000`, {
-          headers: {
-            Authorization: `Bearer ${token}`
-          }
-        });
-
-        if (response.data.success && Array.isArray(response.data.data)) {
-          const users = response.data.data;
-          const activeUsers = users.filter((user: User) => user.active_status === "ACTIVE").length;
-          
-          setMetrics({
-            totalUsers: users.length,
-            activeUsers,
-            inactiveUsers: users.length - activeUsers
-          });
-        }
-      } catch (err) {
-        console.error('Failed to fetch users:', err);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchUsers();
-  }, []);
+  // Use React Query to get user metrics
+  const { metrics, isLoading } = useUserMetrics();
 
   return (
     <motion.div 
@@ -89,7 +29,7 @@ export default function UsersPage() {
         transition={{ duration: 0.5, delay: 0.2 }}
         className="grid grid-cols-1 md:grid-cols-3 gap-6"
       >
-        {loading ? (
+        {isLoading ? (
           <>
             <div className="bg-card rounded-lg shadow-sm overflow-hidden border border-border/40 p-6">
               <div className="flex items-center justify-between mb-4">
@@ -145,7 +85,7 @@ export default function UsersPage() {
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.5, delay: 0.4 }}
       >
-        <UsersTable loading={loading} />
+        <UsersTable />
       </motion.div>
     </motion.div>
   );
