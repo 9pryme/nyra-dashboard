@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Loader2, AlertCircle, CheckCircle2, Settings, Save } from "lucide-react";
 import { motion } from "framer-motion";
-import axios from "axios";
+import { useServiceFeatures, useBatchUpdateSettings } from "@/hooks/use-admin";
 
 interface FeatureSettings {
   id: string;
@@ -19,57 +19,35 @@ interface FeatureSettings {
 }
 
 export default function ConfigPage() {
-  const [features, setFeatures] = useState<FeatureSettings[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState<string | null>(null);
+  const [localFeatures, setLocalFeatures] = useState<FeatureSettings[]>([]);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
 
+  // React Query hooks
+  const { 
+    data: features, 
+    isLoading, 
+    error,
+    refetch: refetchFeatures 
+  } = useServiceFeatures();
+  
+  const batchUpdateMutation = useBatchUpdateSettings();
+
+  // Initialize local state when features are loaded
   useEffect(() => {
-    fetchData();
-  }, []);
-
-  const fetchData = async () => {
-    const token = localStorage.getItem('token');
-    if (!token) {
-      setError('No authentication token found');
-      setLoading(false);
-      return;
+    if (features && !localFeatures.length) {
+      setLocalFeatures(features);
     }
+  }, [features, localFeatures.length]);
 
-    try {
-      const featuresResponse = await axios.get(`${process.env.NEXT_PUBLIC_API_URL}/admin/control-panel/get-features`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-
-      if (featuresResponse.data.success) {
-        setFeatures(featuresResponse.data.data);
-        setError(null);
-      } else {
-        throw new Error('Failed to fetch configuration data');
-      }
-    } catch (err: any) {
-      console.error('Config fetch error:', err);
-      setError(err.response?.data?.message || 'Failed to fetch configuration data');
-    } finally {
-      setLoading(false);
+  // Update local state when features change
+  useEffect(() => {
+    if (features && features.length > 0 && !hasUnsavedChanges) {
+      setLocalFeatures(features);
     }
-  };
-
-  const updateSetting = async (settingsId: string, properties: any) => {
-    const token = localStorage.getItem('token');
-    if (!token) throw new Error('No authentication token found');
-
-    await axios.post(
-      `${process.env.NEXT_PUBLIC_API_URL}/admin/control-panel/update-settings`,
-      { settings_id: settingsId, properties },
-      { headers: { Authorization: `Bearer ${token}` } }
-    );
-  };
+  }, [features, hasUnsavedChanges]);
 
   const handleSettingChange = (settingsId: string, path: string[], value: any) => {
-    setFeatures(prev => 
+    setLocalFeatures(prev => 
       prev.map(feature => {
         if (feature.id === settingsId) {
           const updatedProperties = { ...feature.properties };
@@ -77,6 +55,9 @@ export default function ConfigPage() {
           
           // Navigate to the nested property
           for (let i = 0; i < path.length - 1; i++) {
+            if (!current[path[i]]) {
+              current[path[i]] = {};
+            }
             current = current[path[i]];
           }
           current[path[path.length - 1]] = value;
@@ -89,31 +70,22 @@ export default function ConfigPage() {
     setHasUnsavedChanges(true);
   };
 
-  const saveAllChanges = async () => {
-    setSaving(true);
-    setError(null);
+  const saveAllChanges = () => {
+    const updates = localFeatures.map(feature => ({
+      settingsId: feature.id,
+      properties: feature.properties
+    }));
     
-    try {
-      // Save each modified feature
-      for (const feature of features) {
-        await updateSetting(feature.id, feature.properties);
+    batchUpdateMutation.mutate(updates, {
+      onSuccess: () => {
+        setHasUnsavedChanges(false);
       }
-      
-      setSuccess('All settings saved successfully!');
-      setHasUnsavedChanges(false);
-      
-      setTimeout(() => setSuccess(null), 3000);
-    } catch (err: any) {
-      console.error('Failed to save settings:', err);
-      setError(err.response?.data?.message || 'Failed to save settings');
-    } finally {
-      setSaving(false);
-    }
+    });
   };
 
-  const findFeature = (id: string) => features.find(f => f.id === id);
+  const findFeature = (id: string) => localFeatures.find((f: FeatureSettings) => f.id === id);
 
-  if (loading) {
+  if (isLoading) {
     return (
       <div className="flex items-center justify-center min-h-[50vh]">
         <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
@@ -121,14 +93,14 @@ export default function ConfigPage() {
     );
   }
 
-  if (error && !features.length) {
+  if (error && !localFeatures.length) {
     return (
       <div className="max-w-2xl mx-auto mt-8">
         <Alert variant="destructive">
           <AlertCircle className="h-4 w-4" />
-          <AlertDescription>{error}</AlertDescription>
+          <AlertDescription>{error.message || 'Failed to load data'}</AlertDescription>
         </Alert>
-        <Button onClick={fetchData} variant="outline" className="mt-4">
+        <Button onClick={() => refetchFeatures()} variant="outline" className="mt-4">
           Retry
         </Button>
       </div>
@@ -165,8 +137,8 @@ export default function ConfigPage() {
           </div>
           
           {hasUnsavedChanges && (
-            <Button onClick={saveAllChanges} disabled={saving} className="flex items-center gap-2">
-              {saving ? (
+            <Button onClick={saveAllChanges} disabled={batchUpdateMutation.isPending} className="flex items-center gap-2">
+              {batchUpdateMutation.isPending ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
               ) : (
                 <Save className="h-4 w-4" />
@@ -176,19 +148,10 @@ export default function ConfigPage() {
           )}
         </div>
 
-        {success && (
-          <Alert className="border-green-200 bg-green-50 dark:border-green-800 dark:bg-green-950">
-            <CheckCircle2 className="h-4 w-4 text-green-600 dark:text-green-400" />
-            <AlertDescription className="text-green-800 dark:text-green-200">
-              {success}
-            </AlertDescription>
-          </Alert>
-        )}
-
-        {error && (
+        {batchUpdateMutation.isError && (
           <Alert variant="destructive">
             <AlertCircle className="h-4 w-4" />
-            <AlertDescription>{error}</AlertDescription>
+            <AlertDescription>{batchUpdateMutation.error?.message || 'Failed to save settings'}</AlertDescription>
           </Alert>
         )}
       </motion.div>

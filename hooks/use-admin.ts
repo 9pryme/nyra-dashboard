@@ -276,6 +276,124 @@ export function useServiceManagement() {
   };
 }
 
+// Update settings mutation
+export function useUpdateSettings() {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+
+  return useMutation({
+    mutationFn: async (data: { settingsId: string; properties: any }) => {
+      const token = localStorage.getItem('token');
+      if (!token) {
+        throw new Error('No authentication token found');
+      }
+
+      // The API has a nested structure when returning data, but expects flattened structure when updating
+      // For all settings, we need to flatten the structure by removing the duplicate property name
+      let flattenedProperties = data.properties;
+      if (data.properties[data.settingsId]) {
+        flattenedProperties = data.properties[data.settingsId];
+      }
+
+      const payload = { settings_id: data.settingsId, properties: flattenedProperties };
+
+      const response = await axios.post(
+        `${process.env.NEXT_PUBLIC_API_URL}/admin/control-panel/update-settings`,
+        payload,
+        {
+          headers: { 
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          }
+        }
+      );
+
+      if (!response.data.success) {
+        throw new Error(response.data.message || 'Failed to update settings');
+      }
+
+      return response.data;
+    },
+    onSuccess: () => {
+      // Invalidate and refetch service features to get updated data
+      queryClient.invalidateQueries({ queryKey: adminKeys.serviceFeatures() });
+      
+      toast({
+        title: "Success",
+        description: "Settings updated successfully",
+      });
+    },
+    onError: (error) => {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to update settings",
+        variant: "destructive",
+      });
+    },
+    retry: 2,
+  });
+}
+
+// Batch update settings mutation
+export function useBatchUpdateSettings() {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+
+  return useMutation({
+    mutationFn: async (updates: Array<{ settingsId: string; properties: any }>) => {
+      const token = localStorage.getItem('token');
+      if (!token) {
+        throw new Error('No authentication token found');
+      }
+
+      // Process each update sequentially to ensure data consistency
+      for (const update of updates) {
+        // The API has a nested structure when returning data, but expects flattened structure when updating
+        let flattenedProperties = update.properties;
+        if (update.properties[update.settingsId]) {
+          flattenedProperties = update.properties[update.settingsId];
+        }
+
+        const payload = { settings_id: update.settingsId, properties: flattenedProperties };
+
+        const response = await axios.post(
+          `${process.env.NEXT_PUBLIC_API_URL}/admin/control-panel/update-settings`,
+          payload,
+          {
+            headers: { 
+              Authorization: `Bearer ${token}`,
+              'Content-Type': 'application/json'
+            }
+          }
+        );
+
+        if (!response.data.success) {
+          throw new Error(response.data.message || `Failed to update ${update.settingsId} settings`);
+        }
+      }
+
+      return { success: true };
+    },
+    onSuccess: () => {
+      // Invalidate and refetch service features to get updated data
+      queryClient.invalidateQueries({ queryKey: adminKeys.serviceFeatures() });
+      
+      toast({
+        title: "Success",
+        description: "All settings updated successfully",
+      });
+    },
+    onError: (error) => {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to update settings",
+        variant: "destructive",
+      });
+    },
+    retry: 2,
+  });
+}
+
 // Send notification mutation
 export function useSendNotification() {
   const queryClient = useQueryClient();

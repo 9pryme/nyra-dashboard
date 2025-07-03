@@ -15,7 +15,7 @@ import {
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Loader2, AlertCircle, CheckCircle2, Settings2, Save, Network } from "lucide-react";
 import { motion } from "framer-motion";
-import axios from "axios";
+import { useServiceFeatures, useServiceOptions, useBatchUpdateSettings } from "@/hooks/use-admin";
 
 interface FeatureSettings {
   id: string;
@@ -40,64 +40,41 @@ interface ProviderOptions {
 }
 
 export default function ProvidersPage() {
-  const [features, setFeatures] = useState<FeatureSettings[]>([]);
-  const [providerOptions, setProviderOptions] = useState<ProviderOptions | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState<string | null>(null);
+  const [localFeatures, setLocalFeatures] = useState<FeatureSettings[]>([]);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
 
+  // React Query hooks
+  const { 
+    data: features, 
+    isLoading: featuresLoading, 
+    error: featuresError,
+    refetch: refetchFeatures 
+  } = useServiceFeatures();
+  
+  const { 
+    data: providerOptions, 
+    isLoading: optionsLoading, 
+    error: optionsError 
+  } = useServiceOptions();
+  
+  const batchUpdateMutation = useBatchUpdateSettings();
+
+  // Initialize local state when features are loaded
   useEffect(() => {
-    fetchData();
-  }, []);
-
-  const fetchData = async () => {
-    const token = localStorage.getItem('token');
-    if (!token) {
-      setError('No authentication token found');
-      setLoading(false);
-      return;
+    if (features && !localFeatures.length) {
+      setLocalFeatures(features);
     }
+  }, [features, localFeatures.length]);
 
-    try {
-      const [featuresResponse, optionsResponse] = await Promise.all([
-        axios.get(`${process.env.NEXT_PUBLIC_API_URL}/admin/control-panel/get-features`, {
-          headers: { Authorization: `Bearer ${token}` }
-        }),
-        axios.get(`${process.env.NEXT_PUBLIC_API_URL}/admin/control-panel/options`, {
-          headers: { Authorization: `Bearer ${token}` }
-        })
-      ]);
-
-      if (featuresResponse.data.success && optionsResponse.data.success) {
-        setFeatures(featuresResponse.data.data);
-        setProviderOptions(optionsResponse.data.data);
-        setError(null);
-      } else {
-        throw new Error('Failed to fetch provider configuration data');
-      }
-    } catch (err: any) {
-      console.error('Provider fetch error:', err);
-      setError(err.response?.data?.message || 'Failed to fetch provider configuration data');
-    } finally {
-      setLoading(false);
+  // Update local state when features change
+  useEffect(() => {
+    if (features && features.length > 0 && !hasUnsavedChanges) {
+      setLocalFeatures(features);
     }
-  };
-
-  const updateSetting = async (settingsId: string, properties: any) => {
-    const token = localStorage.getItem('token');
-    if (!token) throw new Error('No authentication token found');
-
-    await axios.post(
-      `${process.env.NEXT_PUBLIC_API_URL}/admin/control-panel/update-settings`,
-      { settings_id: settingsId, properties },
-      { headers: { Authorization: `Bearer ${token}` } }
-    );
-  };
+  }, [features, hasUnsavedChanges]);
 
   const handleSettingChange = (settingsId: string, path: string[], value: any) => {
-    setFeatures(prev => 
+    setLocalFeatures(prev => 
       prev.map(feature => {
         if (feature.id === settingsId) {
           const updatedProperties = { ...feature.properties };
@@ -105,6 +82,9 @@ export default function ProvidersPage() {
           
           // Navigate to the nested property
           for (let i = 0; i < path.length - 1; i++) {
+            if (!current[path[i]]) {
+              current[path[i]] = {};
+            }
             current = current[path[i]];
           }
           current[path[path.length - 1]] = value;
@@ -117,35 +97,30 @@ export default function ProvidersPage() {
     setHasUnsavedChanges(true);
   };
 
-  const saveAllChanges = async () => {
-    setSaving(true);
-    setError(null);
+  const saveAllChanges = () => {
+    const updates = localFeatures.map(feature => ({
+      settingsId: feature.id,
+      properties: feature.properties
+    }));
     
-    try {
-      // Save each modified feature
-      for (const feature of features) {
-        await updateSetting(feature.id, feature.properties);
+    batchUpdateMutation.mutate(updates, {
+      onSuccess: () => {
+        setHasUnsavedChanges(false);
       }
-      
-      setSuccess('All provider settings saved successfully!');
-      setHasUnsavedChanges(false);
-      
-      setTimeout(() => setSuccess(null), 3000);
-    } catch (err: any) {
-      console.error('Failed to save provider settings:', err);
-      setError(err.response?.data?.message || 'Failed to save provider settings');
-    } finally {
-      setSaving(false);
-    }
+    });
   };
 
   const getProviderDisplayName = (providerValue: string) => {
+    if (!providerValue) return '';
     return providerOptions?.providers[providerValue]?.name || providerValue;
   };
 
-  const findFeature = (id: string) => features.find(f => f.id === id);
+  const findFeature = (id: string) => localFeatures.find((f: FeatureSettings) => f.id === id);
 
-  if (loading) {
+  const isLoading = featuresLoading || optionsLoading;
+  const error = featuresError || optionsError;
+
+  if (isLoading) {
     return (
       <div className="flex items-center justify-center min-h-[50vh]">
         <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
@@ -153,14 +128,14 @@ export default function ProvidersPage() {
     );
   }
 
-  if (error && !features.length) {
+  if (error && !localFeatures.length) {
     return (
       <div className="max-w-2xl mx-auto mt-8">
         <Alert variant="destructive">
           <AlertCircle className="h-4 w-4" />
-          <AlertDescription>{error}</AlertDescription>
+          <AlertDescription>{error.message || 'Failed to load data'}</AlertDescription>
         </Alert>
-        <Button onClick={fetchData} variant="outline" className="mt-4">
+        <Button onClick={() => refetchFeatures()} variant="outline" className="mt-4">
           Retry
         </Button>
       </div>
@@ -187,8 +162,8 @@ export default function ProvidersPage() {
           </div>
           
           {hasUnsavedChanges && (
-            <Button onClick={saveAllChanges} disabled={saving} className="flex items-center gap-2">
-              {saving ? (
+            <Button onClick={saveAllChanges} disabled={batchUpdateMutation.isPending} className="flex items-center gap-2">
+              {batchUpdateMutation.isPending ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
               ) : (
                 <Save className="h-4 w-4" />
@@ -198,19 +173,10 @@ export default function ProvidersPage() {
           )}
         </div>
 
-        {success && (
-          <Alert className="border-green-200 bg-green-50 dark:border-green-800 dark:bg-green-950">
-            <CheckCircle2 className="h-4 w-4 text-green-600 dark:text-green-400" />
-            <AlertDescription className="text-green-800 dark:text-green-200">
-              {success}
-            </AlertDescription>
-          </Alert>
-        )}
-
-        {error && (
+        {batchUpdateMutation.isError && (
           <Alert variant="destructive">
             <AlertCircle className="h-4 w-4" />
-            <AlertDescription>{error}</AlertDescription>
+            <AlertDescription>{batchUpdateMutation.error?.message || 'Failed to save settings'}</AlertDescription>
           </Alert>
         )}
       </motion.div>
@@ -243,7 +209,7 @@ export default function ProvidersPage() {
                     <SelectValue placeholder="Select transfer provider" />
                   </SelectTrigger>
                   <SelectContent>
-                    {providerOptions?.options.transfers?.map((provider) => (
+                    {providerOptions?.options.transfers?.map((provider: string) => (
                       <SelectItem key={provider} value={provider}>
                         {getProviderDisplayName(provider)}
                       </SelectItem>
@@ -262,11 +228,18 @@ export default function ProvidersPage() {
                     <SelectValue placeholder="Select card provider" />
                   </SelectTrigger>
                   <SelectContent>
-                    {Object.keys(providerOptions?.providers || {}).map((provider) => (
+                    {Object.keys(providerOptions?.providers || {}).map((provider: string) => (
                       <SelectItem key={provider} value={provider}>
                         {getProviderDisplayName(provider)}
                       </SelectItem>
                     ))}
+                    {/* Add current provider if it's not in the available options */}
+                    {chosenProviders?.card_creation?.provider && 
+                     !Object.keys(providerOptions?.providers || {}).includes(chosenProviders.card_creation.provider) && (
+                      <SelectItem key={chosenProviders.card_creation.provider} value={chosenProviders.card_creation.provider}>
+                        {chosenProviders.card_creation.provider} (Current)
+                      </SelectItem>
+                    )}
                   </SelectContent>
                 </Select>
               </div>
@@ -281,7 +254,7 @@ export default function ProvidersPage() {
                     <SelectValue placeholder="Select primary bank" />
                   </SelectTrigger>
                   <SelectContent>
-                    {providerOptions?.options.primary_wallet?.map((provider) => (
+                    {providerOptions?.options.primary_wallet?.map((provider: string) => (
                       <SelectItem key={provider} value={provider}>
                         {getProviderDisplayName(provider)}
                       </SelectItem>
@@ -316,7 +289,7 @@ export default function ProvidersPage() {
                       <SelectValue placeholder={`Select ${service.replace('_', ' ')} provider`} />
                     </SelectTrigger>
                     <SelectContent>
-                      {providerOptions?.options.bills?.[service as keyof typeof providerOptions.options.bills]?.map((provider) => (
+                      {providerOptions?.options.bills?.[service as keyof typeof providerOptions.options.bills]?.map((provider: string) => (
                         <SelectItem key={provider} value={provider}>
                           {getProviderDisplayName(provider)}
                         </SelectItem>
